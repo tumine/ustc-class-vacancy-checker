@@ -59,24 +59,44 @@ object CatalogScriptUtils {
                     
                     var searchInput = null;
                     
+                    // 获取所有可能是我们要找的输入框
+                    var allInputs = Array.from(document.querySelectorAll('input.el-input__inner, input.ant-input, input[type="text"], input[type="search"], input:not([type])'));
+                    // 过滤掉隐藏的输入框
+                    var visibleInputs = allInputs.filter(function(el) {
+                        var style = window.getComputedStyle(el);
+                        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetWidth > 0;
+                    });
+                    
+                    var inputsToCheck = visibleInputs.length > 0 ? visibleInputs : allInputs;
+                    
+                    if (inputsToCheck.length === 0) {
+                        logDom("No inputs found at all, attempt " + attempts);
+                        return false;
+                    }
+                    
                     if ($isTeacher) {
-                        // 查找教师搜索框
-                        searchInput = document.querySelector('input[placeholder*="教师"]')
-                            || document.querySelectorAll('input.el-input__inner')[1] // 假设第二个输入框是教师
-                            || Array.from(document.querySelectorAll('input[type="text"]')).find(el => el.placeholder && el.placeholder.includes("教师"));
-                            
-                        // 如果找不到特定教师框，降级为搜索通用的搜索框。有的页面可能只有一个综合搜索框
-                        if (!searchInput) {
-                            searchInput = document.querySelector('input[placeholder*="搜索"]')
-                                || document.querySelector('input.el-input__inner')
-                                || document.querySelector('input[type="text"]');
+                        // 1. 根据 placeholder 寻找教师
+                        searchInput = inputsToCheck.find(function(el) { 
+                            var p = el.placeholder || "";
+                            return p.includes("教师") || p.includes("老师") || p.includes("教员") || p.includes("姓名");
+                        });
+                        
+                        // 2. 如果没找到，降级为第二个输入框 (在教务系统中往往第二个才是教师)
+                        if (!searchInput && inputsToCheck.length >= 2) {
+                            searchInput = inputsToCheck[1];
                         }
                     } else {
-                        // 查找课程名/编号搜索框
-                        searchInput = document.querySelector('input[placeholder*="课程"]')
-                            || document.querySelector('input[placeholder*="编号"]')
-                            || document.querySelector('input.el-input__inner')
-                            || document.querySelector('input[type="text"]');
+                        // 1. 根据 placeholder 寻找课程
+                        searchInput = inputsToCheck.find(function(el) { 
+                            var p = el.placeholder || "";
+                            return p.includes("课程") || p.includes("编号") || p.includes("名称") || p.includes("课堂") || p.includes("关键");
+                        });
+                    }
+                    
+                    // 3. 终极兜底：选第一个可见的输入框
+                    if (!searchInput) {
+                        logDom("Fallback to the first available input...");
+                        searchInput = inputsToCheck[0];
                     }
                     
                     if (!searchInput) {
