@@ -20,6 +20,7 @@ import com.ustc.vacancychecker.data.remote.CatalogScriptUtils
 @Composable
 fun WebViewCourseLookupScreen(
     keyword: String,
+    searchType: SearchType,
     onSearchResults: (String) -> Unit,
     onSearchError: (String) -> Unit
 ) {
@@ -30,7 +31,7 @@ fun WebViewCourseLookupScreen(
     var hasTriggeredSearch by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 进度条
+        // ... (省略进度条) ...
         if (isLoading) {
             LinearProgressIndicator(
                 progress = { loadingProgress / 100f },
@@ -53,7 +54,6 @@ fun WebViewCourseLookupScreen(
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
-                        databaseEnabled = true
                         cacheMode = WebSettings.LOAD_DEFAULT
                         userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                         setSupportMultipleWindows(false)
@@ -109,7 +109,8 @@ fun WebViewCourseLookupScreen(
                                 Log.d("CourseLookup", "Catalog page loaded, injecting search script for: $keyword")
                                 // 等待 Vue SPA 渲染完成
                                 view?.postDelayed({
-                                    val js = CatalogScriptUtils.getSearchScript(keyword)
+                                    val isTeacher = searchType == SearchType.TEACHER
+                                    val js = CatalogScriptUtils.getSearchScript(keyword, isTeacher)
                                     view.evaluateJavascript(js, null)
                                 }, 2000)
                             }

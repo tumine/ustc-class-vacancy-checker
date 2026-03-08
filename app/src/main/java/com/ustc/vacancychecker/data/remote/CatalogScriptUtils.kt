@@ -10,8 +10,9 @@ object CatalogScriptUtils {
     /**
      * 在 catalog.ustc.edu.cn/query/lesson 页面的搜索框中输入关键字并触发搜索
      * @param keyword 搜索关键字
+     * @param isTeacher 是否按教师搜索
      */
-    fun getSearchScript(keyword: String): String {
+    fun getSearchScript(keyword: String, isTeacher: Boolean = false): String {
         val safeKeyword = keyword
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
@@ -39,15 +40,44 @@ object CatalogScriptUtils {
                 }
                 
                 function trySearch() {
-                    // 查找搜索输入框
-                    var searchInput = document.querySelector('input[placeholder*="搜索"]')
-                        || document.querySelector('input[placeholder*="关键"]')
-                        || document.querySelector('input[placeholder*="课程"]')
-                        || document.querySelector('input[type="search"]')
-                        || document.querySelector('.el-input__inner')
-                        || document.querySelector('.ant-input')
-                        || document.querySelector('input.search-input')
-                        || document.querySelector('input[type="text"]');
+                    // 检查页面是否正在加载。在加载数据时直接输入可能会被 Vue 清除。
+                    var loadingElements = document.querySelectorAll('.el-loading-mask, .ant-spin, .loading, [class*="loading"]');
+                    var isSpinnerVisible = Array.from(loadingElements).some(function(el) {
+                        // 检查元素是否真正可见
+                        var style = window.getComputedStyle(el);
+                        return style && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && el.offsetWidth > 0;
+                    });
+                    
+                    var isLoading = isSpinnerVisible 
+                        || document.body.innerText.includes('正在加载') 
+                        || document.body.innerText.includes('请稍候');
+                    
+                    if (isLoading) {
+                        logDom("Page is loading, waiting before searching...");
+                        return false;
+                    }
+                    
+                    var searchInput = null;
+                    
+                    if ($isTeacher) {
+                        // 查找教师搜索框
+                        searchInput = document.querySelector('input[placeholder*="教师"]')
+                            || document.querySelectorAll('input.el-input__inner')[1] // 假设第二个输入框是教师
+                            || Array.from(document.querySelectorAll('input[type="text"]')).find(el => el.placeholder && el.placeholder.includes("教师"));
+                            
+                        // 如果找不到特定教师框，降级为搜索通用的搜索框。有的页面可能只有一个综合搜索框
+                        if (!searchInput) {
+                            searchInput = document.querySelector('input[placeholder*="搜索"]')
+                                || document.querySelector('input.el-input__inner')
+                                || document.querySelector('input[type="text"]');
+                        }
+                    } else {
+                        // 查找课程名/编号搜索框
+                        searchInput = document.querySelector('input[placeholder*="课程"]')
+                            || document.querySelector('input[placeholder*="编号"]')
+                            || document.querySelector('input.el-input__inner')
+                            || document.querySelector('input[type="text"]');
+                    }
                     
                     if (!searchInput) {
                         logDom("Search input not found, attempt " + attempts);
@@ -82,7 +112,7 @@ object CatalogScriptUtils {
                         // 等待搜索结果加载后提取
                         setTimeout(function() {
                             try { AndroidBridge.onSearchTriggered(); } catch(e) {}
-                        }, 2000);
+                        }, 4000);
                     }, 500);
                     
                     return true;
@@ -121,6 +151,22 @@ object CatalogScriptUtils {
                 }
                 
                 function tryExtract() {
+                    // 首先检测是否有加指示器
+                    var loadingElements = document.querySelectorAll('.el-loading-mask, .ant-spin, .loading, [class*="loading"]');
+                    var isSpinnerVisible = Array.from(loadingElements).some(function(el) {
+                        var style = window.getComputedStyle(el);
+                        return style && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && el.offsetWidth > 0;
+                    });
+                    
+                    var isLoading = isSpinnerVisible 
+                        || document.body.innerText.includes('正在加载') 
+                        || document.body.innerText.includes('请稍候');
+                        
+                    if (isLoading) {
+                        logDom("Page is still loading, waiting...");
+                        return false;
+                    }
+                    
                     var results = [];
                     
                     // 策略1: 表格行
@@ -156,10 +202,14 @@ object CatalogScriptUtils {
                         }
                     }
                     
+                    // 如果找到结果，或者没有加载动画并且已经尝试了足够的次数(比如至少延时了3秒)，才返回
                     if (results.length > 0) {
                         logDom("Extracted " + results.length + " courses");
                         try { AndroidBridge.onSearchResults(JSON.stringify(results)); } catch(e) {}
                         return true;
+                    } else if (attempts > 5) {
+                        // 如果多次尝试仍无结果，且页面未在加载，可能真的没有结果，继续重试直到超时
+                        logDom("No results found yet, attempt " + attempts);
                     }
                     
                     return false;

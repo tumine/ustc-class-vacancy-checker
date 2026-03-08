@@ -2,6 +2,8 @@ package com.ustc.vacancychecker.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -41,9 +43,10 @@ fun NavGraph(
         
         composable(Routes.COURSE_CHECK) { backStackEntry ->
             // 监听从 CourseLookup 页面返回的课堂号
-            val selectedClassCode = backStackEntry
+            val selectedClassCode by backStackEntry
                 .savedStateHandle
-                .get<String>(KEY_SELECTED_CLASS_CODE)
+                .getStateFlow<String?>(KEY_SELECTED_CLASS_CODE, null)
+                .collectAsState()
             
             CourseCheckScreen(
                 onNavigateToSettings = {

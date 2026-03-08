@@ -31,6 +31,7 @@ fun CourseLookupScreen(
     if (uiState.showWebView) {
         WebViewCourseLookupScreen(
             keyword = uiState.keyword,
+            searchType = uiState.searchType,
             onSearchResults = { json -> viewModel.onSearchResults(json) },
             onSearchError = { msg -> viewModel.onSearchError(msg) }
         )
@@ -62,6 +63,29 @@ fun CourseLookupScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
+            // 搜索类型选择
+            val tabs = listOf("课程名 / 编号", "授课教师")
+            val selectedTabIndex = if (uiState.searchType == SearchType.COURSE) 0 else 1
+
+            TabRow(
+                selectedTabIndex = selectedTabIndex,
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.primary,
+            ) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTabIndex == index,
+                        onClick = {
+                            viewModel.updateSearchType(if (index == 0) SearchType.COURSE else SearchType.TEACHER)
+                        },
+                        text = { Text(title) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // 搜索栏：关键字输入框 + 搜索按钮
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -72,7 +96,9 @@ fun CourseLookupScreen(
                     value = uiState.keyword,
                     onValueChange = { viewModel.updateKeyword(it) },
                     label = { Text("搜索关键字") },
-                    placeholder = { Text("输入课程名或教师名") },
+                    placeholder = { 
+                        Text(if (uiState.searchType == SearchType.COURSE) "输入课程名或编号" else "输入教师名") 
+                    },
                     singleLine = true,
                     leadingIcon = {
                         Icon(Icons.Filled.Search, contentDescription = null)

@@ -20,13 +20,24 @@ class CourseCheckViewModel @Inject constructor(
     fun updateClassCode(code: String) {
         uiState = uiState.copy(classCode = code)
     }
+
+    fun addCourseToTrack(code: String) {
+        if (code.isNotBlank() && !uiState.trackedCourses.contains(code)) {
+            uiState = uiState.copy(trackedCourses = uiState.trackedCourses + code)
+        }
+    }
     
-    fun startCheck() {
-        if (uiState.classCode.isBlank()) {
+    fun removeTrackedCourse(code: String) {
+        uiState = uiState.copy(trackedCourses = uiState.trackedCourses - code)
+    }
+    
+    fun startCheck(code: String = uiState.classCode) {
+        if (code.isBlank()) {
             uiState = uiState.copy(errorMessage = "请输入课堂号")
             return
         }
         uiState = uiState.copy(
+            classCode = code, // 确保如果是从列表点击，输入框也更新
             isChecking = true,
             showWebView = true,
             result = null,
@@ -79,6 +90,7 @@ class CourseCheckViewModel @Inject constructor(
 
 data class CourseCheckUiState(
     val classCode: String = "",
+    val trackedCourses: List<String> = emptyList(),
     val isChecking: Boolean = false,
     val showWebView: Boolean = false,
     val result: VacancyResult? = null,

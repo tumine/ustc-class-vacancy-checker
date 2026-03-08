@@ -19,6 +19,10 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
         uiState = uiState.copy(keyword = keyword)
     }
 
+    fun updateSearchType(type: SearchType) {
+        uiState = uiState.copy(searchType = type)
+    }
+
     fun startSearch() {
         if (uiState.keyword.isBlank()) {
             uiState = uiState.copy(errorMessage = "请输入搜索关键字")
@@ -84,11 +88,17 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
 
 data class CourseLookupUiState(
     val keyword: String = "",
+    val searchType: SearchType = SearchType.COURSE,
     val isSearching: Boolean = false,
     val showWebView: Boolean = false,
     val results: List<CourseInfo> = emptyList(),
     val errorMessage: String? = null
 )
+
+enum class SearchType {
+    COURSE, // 课程名/编号
+    TEACHER // 授课教师
+}
 
 data class CourseInfo(
     val classCode: String,
