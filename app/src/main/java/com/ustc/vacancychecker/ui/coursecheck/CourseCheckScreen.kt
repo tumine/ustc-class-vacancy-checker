@@ -5,6 +5,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ManageSearch
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.Close
 fun CourseCheckScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToCourseLookup: () -> Unit = {},
+    onNavigateToTracker: () -> Unit = {},
     selectedClassCode: String? = null,
     onSelectedClassCodeConsumed: () -> Unit = {},
     viewModel: CourseCheckViewModel = hiltViewModel()
@@ -62,6 +64,12 @@ fun CourseCheckScreen(
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 ),
                 actions = {
+                    IconButton(onClick = onNavigateToTracker) {
+                        Icon(
+                            imageVector = Icons.Filled.List,
+                            contentDescription = "跟踪列表"
+                        )
+                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             imageVector = Icons.Filled.Settings,

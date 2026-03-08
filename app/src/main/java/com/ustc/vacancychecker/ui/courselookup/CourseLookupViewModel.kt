@@ -5,12 +5,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.ustc.vacancychecker.data.local.CourseRepository
+import com.ustc.vacancychecker.data.model.TrackedCourse
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import javax.inject.Inject
 
 @HiltViewModel
-class CourseLookupViewModel @Inject constructor() : ViewModel() {
+class CourseLookupViewModel @Inject constructor(
+    private val courseRepository: CourseRepository
+) : ViewModel() {
 
     var uiState by mutableStateOf(CourseLookupUiState())
         private set
@@ -109,6 +115,49 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
             warningMessage = null
         )
     }
+
+    fun toggleSelection(classCode: String) {
+        val currentSelected = uiState.selectedForTracking.toMutableSet()
+        if (currentSelected.contains(classCode)) {
+            currentSelected.remove(classCode)
+        } else {
+            currentSelected.add(classCode)
+        }
+        uiState = uiState.copy(selectedForTracking = currentSelected)
+    }
+
+    fun clearSuccessMessage() {
+        uiState = uiState.copy(showSuccessMessage = null)
+    }
+
+    fun addToTracking() {
+        val selectedCodes = uiState.selectedForTracking
+        if (selectedCodes.isEmpty()) return
+
+        val coursesToTrack = uiState.results
+            .filter { selectedCodes.contains(it.classCode) }
+            .map {
+                TrackedCourse(
+                    courseId = it.classCode,
+                    courseName = it.courseName,
+                    teacher = it.teacher,
+                    isMonitoring = true
+                )
+            }
+
+        viewModelScope.launch {
+            try {
+                courseRepository.addTrackedCourses(coursesToTrack)
+                uiState = uiState.copy(
+                    selectedForTracking = emptySet(),
+                    showSuccessMessage = "成功添加 ${coursesToTrack.size} 门课程到后台跟踪列表"
+                )
+            } catch (e: Exception) {
+                Log.e("CourseLookup", "Failed to add courses to tracking", e)
+                uiState = uiState.copy(errorMessage = "加入跟踪失败: ${e.message}")
+            }
+        }
+    }
 }
 
 data class CourseLookupUiState(
@@ -118,7 +167,9 @@ data class CourseLookupUiState(
     val showWebView: Boolean = false,
     val results: List<CourseInfo> = emptyList(),
     val errorMessage: String? = null,
-    val warningMessage: String? = null
+    val warningMessage: String? = null,
+    val selectedForTracking: Set<String> = emptySet(),
+    val showSuccessMessage: String? = null
 )
 
 enum class SearchType {

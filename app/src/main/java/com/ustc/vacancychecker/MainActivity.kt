@@ -14,6 +14,13 @@ import com.ustc.vacancychecker.ui.navigation.Routes
 import com.ustc.vacancychecker.ui.theme.UstcVacancyCheckerTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.ustc.vacancychecker.data.worker.ClassVacancyWorker
+import java.util.concurrent.TimeUnit
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -21,8 +28,25 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var credentialsManager: CredentialsManager
     
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 启动后台轮询检测服务 (每 15 分钟一次，仅在有网络时执行)
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+            
+        val workRequest = PeriodicWorkRequestBuilder<ClassVacancyWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .build()
+            
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            "VacancyCheckWork",
+            ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
         
         setContent {
             UstcVacancyCheckerTheme {
