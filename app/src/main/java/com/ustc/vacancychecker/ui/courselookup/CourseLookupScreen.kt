@@ -148,6 +148,24 @@ fun CourseLookupScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
+            // 警告信息
+            uiState.warningMessage?.let { warning ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Text(
+                        text = warning,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             // 搜索结果提示
             if (uiState.results.isNotEmpty()) {
                 Text(

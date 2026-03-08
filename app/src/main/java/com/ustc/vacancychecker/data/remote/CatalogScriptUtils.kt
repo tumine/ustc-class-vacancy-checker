@@ -164,7 +164,13 @@ object CatalogScriptUtils {
         return """
             (function() {
                 var attempts = 0;
-                var maxAttempts = 20;
+                var maxAttempts = 40;
+                var maxPages = 1;
+                var currentPage = 1;
+                var allResults = [];
+                var seenGlobalCodes = {};
+                var stableCount = 0;
+                var lastResultsJSON = "";
                 
                 function logDom(msg) {
                     try { AndroidBridge.logDomInfo(msg); } catch(e) { console.log(msg); }
@@ -229,6 +235,7 @@ object CatalogScriptUtils {
                         
                     if (isLoading) {
                         logDom("Page is still loading, waiting...");
+                        stableCount = 0;
                         return false;
                     }
                     
@@ -267,25 +274,77 @@ object CatalogScriptUtils {
                         }
                     }
                     
-                    var uniqueResults = [];
-                    var seenCodes = {};
-                    for (var r = 0; r < results.length; r++) {
-                        var c = results[r];
-                        if (c.classCode && !seenCodes[c.classCode]) {
-                            seenCodes[c.classCode] = true;
-                            uniqueResults.push(c);
+                    var currentResultsJSON = JSON.stringify(results);
+                    if (results.length > 0 && currentResultsJSON === lastResultsJSON) {
+                        stableCount++;
+                    } else {
+                        lastResultsJSON = currentResultsJSON;
+                        stableCount = 0;
+                    }
+                    
+                    if (stableCount < 2) {
+                        if (results.length === 0 && attempts > 15) {
+                            logDom("No results found after 15 attempts. Proceeding to finish.");
+                        } else {
+                            return false; // 等待两帧DOM稳定
                         }
                     }
                     
-                    if (uniqueResults.length > 0) {
-                        logDom("Extracted " + uniqueResults.length + " unique courses");
-                        try { AndroidBridge.onSearchResults(JSON.stringify(uniqueResults)); } catch(e) {}
-                        return true;
-                    } else if (attempts > 5) {
-                        logDom("No results found yet, attempt " + attempts);
+                    var addedCount = 0;
+                    for (var r = 0; r < results.length; r++) {
+                        var c = results[r];
+                        if (c.classCode && !seenGlobalCodes[c.classCode]) {
+                            seenGlobalCodes[c.classCode] = true;
+                            allResults.push(c);
+                            addedCount++;
+                        }
                     }
                     
-                    return false;
+                    // 查找"下一页"按钮：catalog.ustc.edu.cn 使用 button.btn.sm + material-icons navigate_next
+                    var nextBtn = null;
+                    var canGoNext = false;
+                    
+                    // 策略1: 通过 material-icons navigate_next 图标找到按钮
+                    var allBtns = document.querySelectorAll('button.btn, button.btn.sm');
+                    for (var bi = 0; bi < allBtns.length; bi++) {
+                        var iconEl = allBtns[bi].querySelector('i.material-icons, i');
+                        if (iconEl && iconEl.textContent.trim() === 'navigate_next') {
+                            nextBtn = allBtns[bi];
+                            break;
+                        }
+                    }
+                    
+                    // 策略2: 退而求其次，用 Element UI / Ant Design 常见选择器
+                    if (!nextBtn) {
+                        nextBtn = document.querySelector('.btn-next, .ant-pagination-next, li[title="下一页"], button.next, [aria-label="Next"]');
+                    }
+                    
+                    if (nextBtn) {
+                        var isDisabled = nextBtn.disabled || 
+                                        nextBtn.hasAttribute('disabled') ||
+                                        nextBtn.classList.contains('is-disabled') || 
+                                        nextBtn.classList.contains('disabled');
+                        if (!isDisabled) canGoNext = true;
+                    }
+                    
+                    if (canGoNext && currentPage < maxPages) {
+                        logDom("Extracted " + addedCount + " courses (page " + currentPage + "). Clicking next page...");
+                        currentPage++;
+                        attempts = 0;
+                        stableCount = 0;
+                        lastResultsJSON = "";
+                        nextBtn.click();
+                        return false; 
+                    }
+                    
+                    var reason = (!canGoNext) ? "No more pages" : "Reached max pages";
+                    logDom("Pagination finished. " + reason + ". Total: " + allResults.length);
+                    var payload = {
+                        data: allResults,
+                        maxPageReached: (currentPage >= maxPages && canGoNext)
+                    };
+                    try { AndroidBridge.onSearchResults(JSON.stringify(payload)); } catch(e) {}
+                    return true;
                 }
                 
                 function extractFromCells(cells) {
@@ -420,8 +479,9 @@ object CatalogScriptUtils {
                         clearInterval(intervalId);
                     } else if (attempts >= maxAttempts) {
                         clearInterval(intervalId);
-                        logDom("Timeout: no results extracted after " + maxAttempts + " attempts");
-                        try { AndroidBridge.onSearchResults("[]"); } catch(e) {}
+                        logDom("Timeout: stopped after " + maxAttempts + " attempts (Page: " + currentPage + ")");
+                        var payload = { data: allResults, maxPageReached: false };
+                        try { AndroidBridge.onSearchResults(JSON.stringify(payload)); } catch(e) {}
                     }
                 }, 500);
                 

@@ -25,7 +25,8 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
                 searchType = type,
                 keyword = "",
                 results = emptyList(),
-                errorMessage = null
+                errorMessage = null,
+                warningMessage = null
             )
         }
     }
@@ -39,18 +40,28 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
             isSearching = true,
             showWebView = true,
             results = emptyList(),
-            errorMessage = null
+            errorMessage = null,
+            warningMessage = null
         )
     }
 
     fun onSearchResults(json: String) {
         Log.d("CourseLookup", "Search results received: $json")
         try {
-            val jsonArray = JSONArray(json)
-            val courses = mutableListOf<CourseInfo>()
+            var coursesArray: JSONArray
+            var maxPageReached = false
+            
+            if (json.trim().startsWith("{")) {
+                val jsonObject = org.json.JSONObject(json)
+                coursesArray = jsonObject.optJSONArray("data") ?: JSONArray()
+                maxPageReached = jsonObject.optBoolean("maxPageReached", false)
+            } else {
+                coursesArray = JSONArray(json)
+            }
 
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
+            val courses = mutableListOf<CourseInfo>()
+            for (i in 0 until coursesArray.length()) {
+                val obj = coursesArray.getJSONObject(i)
                 courses.add(
                     CourseInfo(
                         classCode = obj.optString("classCode", ""),
@@ -60,17 +71,22 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
                 )
             }
 
+            val warning = if (maxPageReached) "部分课程由于达到显示上限（1 页 25 条）无法显示，建议进一步明确搜索关键字，以获取更精准结果" else null
+
             uiState = if (courses.isEmpty()) {
                 uiState.copy(
                     isSearching = false,
                     showWebView = false,
-                    errorMessage = "未找到匹配「${uiState.keyword}」的课程"
+                    errorMessage = "未找到匹配「${uiState.keyword}」的课程",
+                    warningMessage = null
                 )
             } else {
                 uiState.copy(
                     isSearching = false,
                     showWebView = false,
-                    results = courses
+                    results = courses,
+                    errorMessage = null,
+                    warningMessage = warning
                 )
             }
         } catch (e: Exception) {
@@ -78,7 +94,8 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
             uiState = uiState.copy(
                 isSearching = false,
                 showWebView = false,
-                errorMessage = "解析搜索结果失败: ${e.message}"
+                errorMessage = "解析搜索结果失败: ${e.message}",
+                warningMessage = null
             )
         }
     }
@@ -88,7 +105,8 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
         uiState = uiState.copy(
             isSearching = false,
             showWebView = false,
-            errorMessage = message
+            errorMessage = message,
+            warningMessage = null
         )
     }
 }
@@ -99,7 +117,8 @@ data class CourseLookupUiState(
     val isSearching: Boolean = false,
     val showWebView: Boolean = false,
     val results: List<CourseInfo> = emptyList(),
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val warningMessage: String? = null
 )
 
 enum class SearchType {
