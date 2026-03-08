@@ -9,6 +9,96 @@ package com.ustc.vacancychecker.data.remote
 object CourseCheckScriptUtils {
 
     /**
+     * 检测是否存在"选课公告"弹窗，如存在则点击"确定"消除
+     * 通过 AndroidBridge.onAnnouncementDismissed(found) 回调结果
+     * @param found: true 表示找到并关闭了弹窗，false 表示未找到弹窗（可直接继续）
+     */
+    fun getDismissAnnouncementScript(): String {
+        return """
+            (function() {
+                var attempts = 0;
+                var maxAttempts = 10;
+                
+                function tryDismissAnnouncement() {
+                    // 查找包含"选课公告"文本的弹窗
+                    // 常见实现：modal、dialog、layer 弹窗
+                    var modals = document.querySelectorAll(
+                        '.modal, .dialog, .layui-layer, .popup, [role="dialog"], .ant-modal, .el-dialog, .ivu-modal'
+                    );
+                    
+                    for (var i = 0; i < modals.length; i++) {
+                        var modalText = modals[i].innerText || modals[i].textContent || '';
+                        if (modalText.indexOf('选课公告') !== -1) {
+                            console.log("Found '选课公告' popup, looking for '确定' button...");
+                            
+                            // 在弹窗内查找"确定"按钮
+                            var buttons = modals[i].querySelectorAll('a, button, span, input[type="button"]');
+                            for (var j = 0; j < buttons.length; j++) {
+                                var btnText = (buttons[j].innerText || buttons[j].textContent || '').trim();
+                                if (btnText === '确定' || btnText === '确 定' || btnText === 'OK') {
+                                    console.log("Found '确定' button, clicking...");
+                                    buttons[j].click();
+                                    try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
+                                    return true;
+                                }
+                            }
+                            
+                            // 也尝试弹窗外部的关闭按钮（某些 layer 弹窗的确定按钮在外层）
+                            var closeBtns = document.querySelectorAll(
+                                '.layui-layer-btn0, .modal-footer .btn-primary, .ant-modal-footer .ant-btn-primary, .el-dialog__footer .el-button--primary, .ivu-modal-footer .ivu-btn-primary'
+                            );
+                            for (var k = 0; k < closeBtns.length; k++) {
+                                console.log("Found confirm button via general selector, clicking...");
+                                closeBtns[k].click();
+                                try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
+                                return true;
+                            }
+                        }
+                    }
+                    
+                    // 备选：直接在全局搜索包含"选课公告"的元素
+                    var allElements = document.querySelectorAll('*');
+                    for (var m = 0; m < allElements.length; m++) {
+                        var el = allElements[m];
+                        if (el.children.length === 0) continue; // 跳过叶节点
+                        var elText = (el.innerText || '').substring(0, 200);
+                        if (elText.indexOf('选课公告') !== -1 && el.offsetWidth > 0) {
+                            // 在该元素内查找"确定"按钮
+                            var innerBtns = el.querySelectorAll('a, button, span, input[type="button"]');
+                            for (var n = 0; n < innerBtns.length; n++) {
+                                var ibText = (innerBtns[n].innerText || innerBtns[n].textContent || '').trim();
+                                if (ibText === '确定' || ibText === '确 定' || ibText === 'OK') {
+                                    console.log("Found '确定' button via fallback, clicking...");
+                                    innerBtns[n].click();
+                                    try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    return false;
+                }
+                
+                var intervalId = setInterval(function() {
+                    attempts++;
+                    if (tryDismissAnnouncement()) {
+                        clearInterval(intervalId);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(intervalId);
+                        // 超时未找到弹窗，说明没有公告，可以继续
+                        console.log("No '选课公告' popup found, proceeding...");
+                        try { AndroidBridge.onAnnouncementDismissed(false); } catch(e) {}
+                    }
+                }, 500);
+                
+                // 立即尝试一次
+                tryDismissAnnouncement();
+            })();
+        """.trimIndent()
+    }
+
+    /**
      * 检测是否存在"进入选课"按钮，如存在则点击
      * 通过 AndroidBridge.onEnterCourseSelectResult(found) 回调结果
      */

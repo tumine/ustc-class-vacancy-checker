@@ -11,15 +11,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
+import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 
 /**
  * WebView 选课页面操作
- * 在选课页面中执行：检测进入选课按钮 → 点击全部课程 → 搜索课堂号 → 读取余量
+ * 在选课页面中执行：自动登录 → 消除公告弹窗 → 点击进入选课 → 搜索课堂号 → 读取余量
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun WebViewCourseCheckScreen(
     classCode: String,
+    credentials: Pair<String, String>? = null,
     onNotInSelectTime: () -> Unit,
     onCourseNotFound: () -> Unit,
     onVacancyResult: (stdCount: Int, limitCount: Int) -> Unit
@@ -30,6 +32,8 @@ fun WebViewCourseCheckScreen(
     var loadingProgress by remember { mutableIntStateOf(0) }
     
     // 状态跟踪
+    var hasLoggedIn by remember { mutableStateOf(false) }
+    var hasHandledAnnouncement by remember { mutableStateOf(false) }
     var hasEnteredCourseSelect by remember { mutableStateOf(false) }
     var hasSearched by remember { mutableStateOf(false) }
     
@@ -67,6 +71,27 @@ fun WebViewCourseCheckScreen(
                     
                     // 添加 JavaScript 接口
                     addJavascriptInterface(object {
+                        @JavascriptInterface
+                        fun captureCredentials(username: String, password: String) {
+                            Log.d("CourseCheck", "Credentials captured for user: $username")
+                        }
+
+                        @JavascriptInterface
+                        fun onLoginErrorDetected() {
+                            Log.e("CourseCheck", "Login error detected during course check")
+                        }
+                        
+                        @JavascriptInterface
+                        fun onAnnouncementDismissed(found: Boolean) {
+                            Log.d("CourseCheck", "Announcement dismissed: found=$found")
+                            hasHandledAnnouncement = true
+                            // 弹窗已处理（或不存在），继续检测"进入选课"按钮
+                            post {
+                                val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
+                                evaluateJavascript(js, null)
+                            }
+                        }
+                        
                         @JavascriptInterface
                         fun onEnterCourseSelectResult(found: Boolean) {
                             Log.d("CourseCheck", "Enter course select result: found=$found")
@@ -119,11 +144,42 @@ fun WebViewCourseCheckScreen(
                             Log.d("CourseCheck", "Page finished: $url")
                             
                             url?.let {
-                                // 已经在选课页面，检测"进入选课"按钮
-                                if (it.contains("course-select") && !hasEnteredCourseSelect) {
-                                    val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
-                                    view?.evaluateJavascript(js, null)
+                                // Case 1: CAS 统一身份认证登录页面 - 注入凭证捕获和自动填充
+                                if (it.contains("id.ustc.edu.cn") || it.contains("passport.ustc.edu.cn")) {
+                                    Log.d("CourseCheck", "Detected CAS login page, injecting login scripts")
+                                    val captureJs = LoginScriptUtils.getCredentialCaptureScript()
+                                    view?.evaluateJavascript(captureJs, null)
+                                    // 自动填充凭证
+                                    credentials?.let { (u, p) ->
+                                        val fillJs = LoginScriptUtils.getAutoFillScript(u, p)
+                                        view?.evaluateJavascript(fillJs, null)
+                                    }
                                 }
+                                // Case 2: 教务系统登录页面 - 自动点击"统一身份认证登录"
+                                else if (it.contains("jw.ustc.edu.cn") && it.contains("login")) {
+                                    Log.d("CourseCheck", "Detected jw login page, auto-clicking CAS login button")
+                                    val loginJs = LoginScriptUtils.getAutoLoginClickScript()
+                                    view?.evaluateJavascript(loginJs, null)
+                                }
+                                // Case 3: 登录成功后落在 jw 主页（非选课页面）- 跳转到选课页
+                                else if (it.contains("jw.ustc.edu.cn") && !it.contains("course-select") && !hasLoggedIn) {
+                                    Log.d("CourseCheck", "Login successful, redirecting to course-select page")
+                                    hasLoggedIn = true
+                                    view?.loadUrl(courseSelectUrl)
+                                }
+                                // Case 4: 已在选课页面
+                                else if (it.contains("course-select") && !hasEnteredCourseSelect) {
+                                    if (!hasHandledAnnouncement) {
+                                        // 先检测并消除"选课公告"弹窗
+                                        val js = CourseCheckScriptUtils.getDismissAnnouncementScript()
+                                        view?.evaluateJavascript(js, null)
+                                    } else {
+                                        // 弹窗已处理，直接检测"进入选课"按钮
+                                        val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
+                                        view?.evaluateJavascript(js, null)
+                                    }
+                                }
+                                Unit
                             }
                         }
                         
@@ -146,7 +202,8 @@ fun WebViewCourseCheckScreen(
                     
                     loadUrl(courseSelectUrl)
                 }
-            }
+            },
+            update = { }
         )
     }
 }

@@ -27,6 +27,7 @@ fun CourseCheckScreen(
     if (uiState.showWebView) {
         WebViewCourseCheckScreen(
             classCode = uiState.classCode,
+            credentials = viewModel.getCredentials(),
             onNotInSelectTime = { viewModel.onNotInSelectTime() },
             onCourseNotFound = { viewModel.onCourseNotFound() },
             onVacancyResult = { stdCount, limitCount ->
