@@ -17,62 +17,172 @@ object CourseCheckScriptUtils {
         return """
             (function() {
                 var attempts = 0;
-                var maxAttempts = 10;
+                var maxAttempts = 30;
+                var hasDumped = false;
+                
+                function logDom(msg) {
+                    try { AndroidBridge.logDomInfo(msg); } catch(e) { console.log(msg); }
+                }
+                
+                function isConfirmButton(text) {
+                    var t = text.trim();
+                    return t === '确定' || t === '确 定' || t === 'OK' || t === 'ok' 
+                        || t === '知道了' || t === '我知道了' || t === '关闭'
+                        || t.indexOf('确定') !== -1;
+                }
+                
+                function dumpDomDiagnostics() {
+                    if (hasDumped) return;
+                    hasDumped = true;
+                    
+                    logDom('=== DOM DIAGNOSTICS START ===');
+                    logDom('URL: ' + window.location.href);
+                    logDom('Body children count: ' + document.body.children.length);
+                    
+                    // 1. 查找所有 fixed/absolute 定位的可见元素
+                    var allEls = document.querySelectorAll('*');
+                    var overlays = [];
+                    for (var i = 0; i < allEls.length; i++) {
+                        var el = allEls[i];
+                        if (el.offsetWidth <= 0 || el.offsetHeight <= 0) continue;
+                        var style = window.getComputedStyle(el);
+                        if (style.position === 'fixed' || (style.position === 'absolute' && style.zIndex > 0)) {
+                            overlays.push({
+                                tag: el.tagName,
+                                id: el.id,
+                                className: (el.className && typeof el.className === 'string') ? el.className.substring(0, 100) : '',
+                                text: (el.innerText || '').substring(0, 80).replace(/\n/g, ' '),
+                                zIndex: style.zIndex,
+                                size: el.offsetWidth + 'x' + el.offsetHeight
+                            });
+                        }
+                    }
+                    logDom('Fixed/Absolute overlays (' + overlays.length + '):');
+                    for (var o = 0; o < overlays.length; o++) {
+                        logDom('  [' + o + '] <' + overlays[o].tag + ' id="' + overlays[o].id + '" class="' + overlays[o].className + '"> z=' + overlays[o].zIndex + ' ' + overlays[o].size + ' text="' + overlays[o].text + '"');
+                    }
+                    
+                    // 2. 查找包含"公告"文字的所有元素
+                    var announcementEls = [];
+                    for (var j = 0; j < allEls.length; j++) {
+                        var el2 = allEls[j];
+                        var directText = '';
+                        for (var cn = 0; cn < el2.childNodes.length; cn++) {
+                            if (el2.childNodes[cn].nodeType === 3) directText += el2.childNodes[cn].textContent;
+                        }
+                        if (directText.indexOf('公告') !== -1 || directText.indexOf('通知') !== -1) {
+                            announcementEls.push({
+                                tag: el2.tagName,
+                                id: el2.id,
+                                className: (el2.className && typeof el2.className === 'string') ? el2.className.substring(0, 100) : '',
+                                text: directText.substring(0, 80)
+                            });
+                        }
+                    }
+                    logDom('Elements with "公告/通知" text (' + announcementEls.length + '):');
+                    for (var a = 0; a < announcementEls.length; a++) {
+                        logDom('  [' + a + '] <' + announcementEls[a].tag + ' id="' + announcementEls[a].id + '" class="' + announcementEls[a].className + '"> text="' + announcementEls[a].text + '"');
+                    }
+                    
+                    // 3. 查找所有可见的按钮类元素
+                    var btns = document.querySelectorAll('a, button, input[type="button"], input[type="submit"], span[onclick], div[onclick]');
+                    var visibleBtns = [];
+                    for (var k = 0; k < btns.length; k++) {
+                        if (btns[k].offsetWidth > 0 && btns[k].offsetHeight > 0) {
+                            var bText = (btns[k].innerText || btns[k].textContent || btns[k].value || '').trim();
+                            if (bText.length > 0 && bText.length < 20) {
+                                visibleBtns.push({
+                                    tag: btns[k].tagName,
+                                    id: btns[k].id,
+                                    className: (btns[k].className && typeof btns[k].className === 'string') ? btns[k].className.substring(0, 80) : '',
+                                    text: bText,
+                                    outerHTML: btns[k].outerHTML.substring(0, 150)
+                                });
+                            }
+                        }
+                    }
+                    logDom('Visible buttons (' + visibleBtns.length + '):');
+                    for (var b = 0; b < visibleBtns.length; b++) {
+                        logDom('  [' + b + '] <' + visibleBtns[b].tag + ' id="' + visibleBtns[b].id + '" class="' + visibleBtns[b].className + '"> text="' + visibleBtns[b].text + '"');
+                        logDom('    html: ' + visibleBtns[b].outerHTML);
+                    }
+                    
+                    // 4. 输出 body 直接子元素
+                    logDom('Body direct children:');
+                    for (var c = 0; c < document.body.children.length; c++) {
+                        var child = document.body.children[c];
+                        logDom('  [' + c + '] <' + child.tagName + ' id="' + child.id + '" class="' + ((child.className && typeof child.className === 'string') ? child.className.substring(0, 80) : '') + '"> visible=' + (child.offsetWidth > 0));
+                    }
+                    
+                    logDom('=== DOM DIAGNOSTICS END ===');
+                }
                 
                 function tryDismissAnnouncement() {
-                    // 查找包含"选课公告"文本的弹窗
-                    // 常见实现：modal、dialog、layer 弹窗
+                    // 策略1: 直接查找常见弹窗确定按钮类名
+                    var quickBtns = document.querySelectorAll(
+                        '.layui-layer-btn0, .layui-layer-btn a:first-child, ' +
+                        '.modal-footer .btn-primary, .modal-footer .btn-default, ' +
+                        '.ant-modal-footer .ant-btn-primary, ' +
+                        '.el-dialog__footer .el-button--primary, ' +
+                        '.el-message-box__btns .el-button--primary, ' +
+                        '.ivu-modal-footer .ivu-btn-primary'
+                    );
+                    for (var q = 0; q < quickBtns.length; q++) {
+                        if (quickBtns[q].offsetWidth > 0) {
+                            logDom("Strategy1: Found confirm button via quick selector, clicking...");
+                            quickBtns[q].click();
+                            try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
+                            return true;
+                        }
+                    }
+                    
+                    // 策略2: 查找包含"公告"/"通知"的弹窗容器
                     var modals = document.querySelectorAll(
-                        '.modal, .dialog, .layui-layer, .popup, [role="dialog"], .ant-modal, .el-dialog, .ivu-modal'
+                        '.modal, .modal-dialog, .dialog, .layui-layer, .layui-layer-dialog, ' +
+                        '.popup, [role="dialog"], [role="alertdialog"], ' +
+                        '.ant-modal, .ant-modal-wrap, .el-dialog, .el-dialog__wrapper, .el-message-box__wrapper, ' +
+                        '.ivu-modal, .ivu-modal-wrap'
                     );
                     
                     for (var i = 0; i < modals.length; i++) {
+                        if (modals[i].offsetWidth <= 0) continue;
                         var modalText = modals[i].innerText || modals[i].textContent || '';
-                        if (modalText.indexOf('选课公告') !== -1) {
-                            console.log("Found '选课公告' popup, looking for '确定' button...");
-                            
-                            // 在弹窗内查找"确定"按钮
-                            var buttons = modals[i].querySelectorAll('a, button, span, input[type="button"]');
-                            for (var j = 0; j < buttons.length; j++) {
-                                var btnText = (buttons[j].innerText || buttons[j].textContent || '').trim();
-                                if (btnText === '确定' || btnText === '确 定' || btnText === 'OK') {
-                                    console.log("Found '确定' button, clicking...");
-                                    buttons[j].click();
+                        if (modalText.indexOf('公告') !== -1 || modalText.indexOf('通知') !== -1) {
+                            logDom("Strategy2: Found popup with announcement text");
+                            var clickables = modals[i].querySelectorAll('a, button, span, div, input[type="button"], input[type="submit"]');
+                            for (var ci = 0; ci < clickables.length; ci++) {
+                                var btnText = (clickables[ci].innerText || clickables[ci].textContent || '').trim();
+                                if (isConfirmButton(btnText)) {
+                                    logDom("Strategy2: Clicking button: '" + btnText + "'");
+                                    clickables[ci].click();
                                     try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
                                     return true;
                                 }
-                            }
-                            
-                            // 也尝试弹窗外部的关闭按钮（某些 layer 弹窗的确定按钮在外层）
-                            var closeBtns = document.querySelectorAll(
-                                '.layui-layer-btn0, .modal-footer .btn-primary, .ant-modal-footer .ant-btn-primary, .el-dialog__footer .el-button--primary, .ivu-modal-footer .ivu-btn-primary'
-                            );
-                            for (var k = 0; k < closeBtns.length; k++) {
-                                console.log("Found confirm button via general selector, clicking...");
-                                closeBtns[k].click();
-                                try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
-                                return true;
                             }
                         }
                     }
                     
-                    // 备选：直接在全局搜索包含"选课公告"的元素
-                    var allElements = document.querySelectorAll('*');
-                    for (var m = 0; m < allElements.length; m++) {
-                        var el = allElements[m];
-                        if (el.children.length === 0) continue; // 跳过叶节点
-                        var elText = (el.innerText || '').substring(0, 200);
-                        if (elText.indexOf('选课公告') !== -1 && el.offsetWidth > 0) {
-                            // 在该元素内查找"确定"按钮
-                            var innerBtns = el.querySelectorAll('a, button, span, input[type="button"]');
-                            for (var n = 0; n < innerBtns.length; n++) {
-                                var ibText = (innerBtns[n].innerText || innerBtns[n].textContent || '').trim();
-                                if (ibText === '确定' || ibText === '确 定' || ibText === 'OK') {
-                                    console.log("Found '确定' button via fallback, clicking...");
-                                    innerBtns[n].click();
+                    // 策略3: 搜索页面上所有可见的"确定"类按钮（在弹窗/遮罩层内的）
+                    var allBtns = document.querySelectorAll('a, button, input[type="button"], input[type="submit"]');
+                    for (var j = 0; j < allBtns.length; j++) {
+                        var btn = allBtns[j];
+                        if (btn.offsetWidth <= 0 || btn.offsetHeight <= 0) continue;
+                        var bText = (btn.innerText || btn.textContent || '').trim();
+                        if (isConfirmButton(bText)) {
+                            var parent = btn.parentElement;
+                            while (parent && parent !== document.body) {
+                                var style = window.getComputedStyle(parent);
+                                var className = (parent.className && typeof parent.className === 'string') ? parent.className : '';
+                                if (style.position === 'fixed' || style.position === 'absolute' ||
+                                    className.indexOf('layer') !== -1 || className.indexOf('modal') !== -1 ||
+                                    className.indexOf('dialog') !== -1 || className.indexOf('popup') !== -1 ||
+                                    className.indexOf('mask') !== -1 || className.indexOf('overlay') !== -1) {
+                                    logDom("Strategy3: Found confirm button in overlay: '" + bText + "'");
+                                    btn.click();
                                     try { AndroidBridge.onAnnouncementDismissed(true); } catch(e) {}
                                     return true;
                                 }
+                                parent = parent.parentElement;
                             }
                         }
                     }
@@ -82,12 +192,18 @@ object CourseCheckScriptUtils {
                 
                 var intervalId = setInterval(function() {
                     attempts++;
+                    
+                    // 在第5次尝试时输出DOM诊断信息
+                    if (attempts === 5) {
+                        dumpDomDiagnostics();
+                    }
+                    
                     if (tryDismissAnnouncement()) {
                         clearInterval(intervalId);
                     } else if (attempts >= maxAttempts) {
                         clearInterval(intervalId);
-                        // 超时未找到弹窗，说明没有公告，可以继续
-                        console.log("No '选课公告' popup found, proceeding...");
+                        logDom("Timeout: No announcement popup dismissed after " + maxAttempts + " attempts");
+                        dumpDomDiagnostics();
                         try { AndroidBridge.onAnnouncementDismissed(false); } catch(e) {}
                     }
                 }, 500);

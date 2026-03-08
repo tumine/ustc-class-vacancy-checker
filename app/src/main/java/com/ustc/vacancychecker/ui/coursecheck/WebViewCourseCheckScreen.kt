@@ -80,14 +80,19 @@ fun WebViewCourseCheckScreen(
                         fun onLoginErrorDetected() {
                             Log.e("CourseCheck", "Login error detected during course check")
                         }
+
+                        @JavascriptInterface
+                        fun logDomInfo(info: String) {
+                            Log.d("CourseCheck-DOM", info)
+                        }
                         
                         @JavascriptInterface
                         fun onAnnouncementDismissed(found: Boolean) {
                             Log.d("CourseCheck", "Announcement dismissed: found=$found")
                             hasHandledAnnouncement = true
-                            // 弹窗已处理（或不存在），继续检测"进入选课"按钮
+                            // 弹窗已处理（或不存在），继续注入搜索脚本
                             post {
-                                val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
+                                val js = CourseCheckScriptUtils.getSearchCourseScript(classCode)
                                 evaluateJavascript(js, null)
                             }
                         }
@@ -97,11 +102,8 @@ fun WebViewCourseCheckScreen(
                             Log.d("CourseCheck", "Enter course select result: found=$found")
                             if (found) {
                                 hasEnteredCourseSelect = true
-                                // 进入选课后，注入搜索脚本
-                                post {
-                                    val js = CourseCheckScriptUtils.getSearchCourseScript(classCode)
-                                    evaluateJavascript(js, null)
-                                }
+                                // 点击"进入选课"后会导航到新页面，等待 onPageFinished 触发后续流程
+                                Log.d("CourseCheck", "Entered course select, waiting for new page to load...")
                             } else {
                                 post { onNotInSelectTime() }
                             }
@@ -167,17 +169,17 @@ fun WebViewCourseCheckScreen(
                                     hasLoggedIn = true
                                     view?.loadUrl(courseSelectUrl)
                                 }
-                                // Case 4: 已在选课页面
+                                // Case 4: 选课 turns 页面（包含"进入选课"按钮） - 直接点击进入
                                 else if (it.contains("course-select") && !hasEnteredCourseSelect) {
-                                    if (!hasHandledAnnouncement) {
-                                        // 先检测并消除"选课公告"弹窗
-                                        val js = CourseCheckScriptUtils.getDismissAnnouncementScript()
-                                        view?.evaluateJavascript(js, null)
-                                    } else {
-                                        // 弹窗已处理，直接检测"进入选课"按钮
-                                        val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
-                                        view?.evaluateJavascript(js, null)
-                                    }
+                                    Log.d("CourseCheck", "On course-select turns page, clicking enter button")
+                                    val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
+                                    view?.evaluateJavascript(js, null)
+                                }
+                                // Case 5: 已点击"进入选课"后的实际选课页面 - 先消除公告弹窗，再搜索
+                                else if (it.contains("course-select") && hasEnteredCourseSelect && !hasHandledAnnouncement) {
+                                    Log.d("CourseCheck", "On actual selection page, dismissing announcement popup")
+                                    val js = CourseCheckScriptUtils.getDismissAnnouncementScript()
+                                    view?.evaluateJavascript(js, null)
                                 }
                                 Unit
                             }
@@ -197,6 +199,48 @@ fun WebViewCourseCheckScreen(
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
                             super.onProgressChanged(view, newProgress)
                             loadingProgress = newProgress
+                        }
+                        
+                        // 处理 JavaScript alert() 弹窗（选课公告可能是 alert 形式）
+                        override fun onJsAlert(
+                            view: WebView?,
+                            url: String?,
+                            message: String?,
+                            result: JsResult?
+                        ): Boolean {
+                            Log.d("CourseCheck", "JS Alert: $message")
+                            // 自动确认所有 alert 弹窗
+                            result?.confirm()
+                            if (message?.contains("选课公告") == true || message?.contains("公告") == true) {
+                                Log.d("CourseCheck", "Dismissed announcement alert")
+                                hasHandledAnnouncement = true
+                                view?.post {
+                                    val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
+                                    view.evaluateJavascript(js, null)
+                                }
+                            }
+                            return true
+                        }
+                        
+                        // 处理 JavaScript confirm() 弹窗
+                        override fun onJsConfirm(
+                            view: WebView?,
+                            url: String?,
+                            message: String?,
+                            result: JsResult?
+                        ): Boolean {
+                            Log.d("CourseCheck", "JS Confirm: $message")
+                            // 自动确认所有 confirm 弹窗
+                            result?.confirm()
+                            if (message?.contains("选课公告") == true || message?.contains("公告") == true) {
+                                Log.d("CourseCheck", "Dismissed announcement confirm")
+                                hasHandledAnnouncement = true
+                                view?.post {
+                                    val js = CourseCheckScriptUtils.getCheckEnterButtonScript()
+                                    view.evaluateJavascript(js, null)
+                                }
+                            }
+                            return true
                         }
                     }
                     
