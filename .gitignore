@@ -1,11 +1,33 @@
-*.iml
-.gradle
+# Build outputs
+/build/
+/app/build/
+/app/release/
+/app/debug/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Gradle
+.gradle/
 /local.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
 local.properties
-/app/build
+
+# IDE - Android Studio / IntelliJ
+/.idea/
+*.iml
+*.iws
+*.ipr
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+*.class
+
+# Log files
+*.log
