@@ -20,7 +20,14 @@ class CourseLookupViewModel @Inject constructor() : ViewModel() {
     }
 
     fun updateSearchType(type: SearchType) {
-        uiState = uiState.copy(searchType = type)
+        if (uiState.searchType != type) {
+            uiState = uiState.copy(
+                searchType = type,
+                keyword = "",
+                results = emptyList(),
+                errorMessage = null
+            )
+        }
     }
 
     fun startSearch() {
