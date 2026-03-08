@@ -31,7 +31,6 @@ fun WebViewCourseLookupScreen(
     var hasTriggeredSearch by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ... (省略进度条) ...
         if (isLoading) {
             LinearProgressIndicator(
                 progress = { loadingProgress / 100f },
