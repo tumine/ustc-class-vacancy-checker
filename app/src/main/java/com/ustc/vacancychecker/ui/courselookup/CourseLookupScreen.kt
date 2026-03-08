@@ -208,11 +208,15 @@ private fun CourseResultItem(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "课堂号: ${course.classCode.ifBlank { "—" }}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                if (course.classCode.isNotBlank()) {
+                    Text(
+                        text = "课堂号: ${course.classCode}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Spacer(modifier = Modifier)
+                }
                 if (course.teacher.isNotBlank()) {
                     Text(
                         text = "教师: ${course.teacher}",
