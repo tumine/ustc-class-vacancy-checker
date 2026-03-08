@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -14,14 +15,29 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Close
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CourseCheckScreen(
     onNavigateToSettings: () -> Unit,
+    onNavigateToCourseLookup: () -> Unit = {},
+    selectedClassCode: String? = null,
+    onSelectedClassCodeConsumed: () -> Unit = {},
     viewModel: CourseCheckViewModel = hiltViewModel()
 ) {
     val uiState = viewModel.uiState
+
+    // 接收从 CourseLookup 页面返回的课堂号
+    LaunchedEffect(selectedClassCode) {
+        if (!selectedClassCode.isNullOrBlank()) {
+            viewModel.updateClassCode(selectedClassCode)
+            viewModel.addCourseToTrack(selectedClassCode)
+            onSelectedClassCodeConsumed()
+        }
+    }
     
     // 如果正在查询，显示 WebView
     if (uiState.showWebView) {
@@ -83,6 +99,22 @@ fun CourseCheckScreen(
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 查找课堂号按钮
+            OutlinedButton(
+                onClick = onNavigateToCourseLookup,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ManageSearch,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("按关键字查找课堂号")
+            }
             
             Spacer(modifier = Modifier.height(24.dp))
             
@@ -105,7 +137,45 @@ fun CourseCheckScreen(
             }
             
             Spacer(modifier = Modifier.height(32.dp))
-            
+
+            // 跟踪的课程列表
+            if (uiState.trackedCourses.isNotEmpty() && !uiState.isChecking) {
+                Text(
+                    text = "已跟踪的课程",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(uiState.trackedCourses) { code ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            onClick = { viewModel.startCheck(code) }
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "课堂号: $code",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                IconButton(onClick = { viewModel.removeTrackedCourse(code) }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Filled.Close, contentDescription = "取消跟踪")
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // 错误信息
             uiState.errorMessage?.let { error ->
                 Card(
@@ -166,3 +236,4 @@ fun CourseCheckScreen(
         }
     }
 }
+
