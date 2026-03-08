@@ -17,6 +17,8 @@ object CatalogScriptUtils {
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
             .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
 
         return """
             (function() {
@@ -347,6 +349,28 @@ object CatalogScriptUtils {
                     return true;
                 }
                 
+                function extractCourseMeta(el) {
+                    var courseNameElement = el.querySelector('.course-name');
+                    var courseCodeElement = el.querySelector('.course-code');
+                    var extCourseName = courseNameElement ? (courseNameElement.innerText || '').trim() : '';
+                    var extCourseCode = courseCodeElement ? (courseCodeElement.innerText || '').trim() : '';
+                    return { name: extCourseName, code: extCourseCode };
+                }
+                
+                function findClassCode(allTokens, existingCode) {
+                    if (existingCode) return existingCode;
+                    var classCode = '';
+                    for (var t = 0; t < allTokens.length; t++) {
+                        var token = allTokens[t];
+                        if (!classCode && (/^[A-Z0-9\.]+$/.test(token) && /\d{4}/.test(token))) {
+                            classCode = token;
+                        } else if (!classCode && /^\d{4,}$/.test(token)) {
+                            classCode = token;
+                        }
+                    }
+                    return classCode;
+                }
+                
                 function extractFromCells(cells) {
                     var allTokens = [];
                     var courseNameElement = null;
@@ -371,25 +395,9 @@ object CatalogScriptUtils {
                         }
                     }
                     
-                    var classCode = '';
-                    var courseName = '';
-                    
-                    if (courseCodeElement) {
-                        classCode = (courseCodeElement.innerText || '').trim();
-                    } else {
-                        for (var t = 0; t < allTokens.length; t++) {
-                            if (!classCode && (/^[A-Z0-9\.]+$/.test(allTokens[t]) && /\d{4}/.test(allTokens[t]))) {
-                                classCode = allTokens[t];
-                            } else if (!classCode && /^\d{4,}$/.test(allTokens[t])) {
-                                classCode = allTokens[t];
-                            }
-                        }
-                    }
-                    
-                    if (courseNameElement) {
-                        courseName = (courseNameElement.innerText || '').trim();
-                    }
-                    
+                    var existingCode = courseCodeElement ? (courseCodeElement.innerText || '').trim() : '';
+                    var classCode = findClassCode(allTokens, existingCode);
+                    var courseName = courseNameElement ? (courseNameElement.innerText || '').trim() : '';
                     var teacher = row ? extractTeachers(row, courseName) : '';
                     
                     if (classCode || courseName) {
@@ -399,34 +407,13 @@ object CatalogScriptUtils {
                 }
                 
                 function extractFromCard(card) {
-                    var courseNameElement = card.querySelector('.course-name');
-                    var extCourseName = '';
-                    if (courseNameElement) {
-                        extCourseName = (courseNameElement.innerText || '').trim();
-                    }
-                    
-                    var courseCodeElement = card.querySelector('.course-code');
-                    var extCourseCode = '';
-                    if (courseCodeElement) {
-                        extCourseCode = (courseCodeElement.innerText || '').trim();
-                    }
-
+                    var meta = extractCourseMeta(card);
                     var allTokens = getTokens(card);
                     
-                    if (allTokens.length === 0 && !extCourseName && !extCourseCode) return null;
+                    if (allTokens.length === 0 && !meta.name && !meta.code) return null;
                     
-                    var classCode = extCourseCode;
-                    if (!classCode) {
-                        for (var t = 0; t < allTokens.length; t++) {
-                            if (!classCode && (/^[A-Z0-9\.]+$/.test(allTokens[t]) && /\d{4}/.test(allTokens[t]))) {
-                                classCode = allTokens[t];
-                            } else if (!classCode && /^\d{4,}$/.test(allTokens[t])) {
-                                classCode = allTokens[t];
-                            }
-                        }
-                    }
-                    
-                    var courseName = extCourseName;
+                    var classCode = findClassCode(allTokens, meta.code);
+                    var courseName = meta.name;
                     var teacher = extractTeachers(card, courseName);
                     
                     if (classCode || courseName) {
@@ -436,35 +423,13 @@ object CatalogScriptUtils {
                 }
                 
                 function extractFromGeneric(el) {
-                    var courseNameElement = el.querySelector('.course-name');
-                    var extCourseName = '';
-                    if (courseNameElement) {
-                        extCourseName = (courseNameElement.innerText || '').trim();
-                    }
-                    
-                    var courseCodeElement = el.querySelector('.course-code');
-                    var extCourseCode = '';
-                    if (courseCodeElement) {
-                        extCourseCode = (courseCodeElement.innerText || '').trim();
-                    }
-
+                    var meta = extractCourseMeta(el);
                     var allTokens = getTokens(el);
                     
-                    if (allTokens.length === 0 && !extCourseName && !extCourseCode) return null;
-                    if (allTokens.length < 2 && !extCourseName && !extCourseCode) return null;
+                    if (allTokens.length < 2 && !meta.name && !meta.code) return null;
                     
-                    var classCode = extCourseCode;
-                    if (!classCode) {
-                        for (var t = 0; t < allTokens.length; t++) {
-                            if (!classCode && (/^[A-Z0-9\.]+$/.test(allTokens[t]) && /\d{4}/.test(allTokens[t]))) {
-                                classCode = allTokens[t];
-                            } else if (!classCode && /^\d{4,}$/.test(allTokens[t])) {
-                                classCode = allTokens[t];
-                            }
-                        }
-                    }
-                    
-                    var courseName = extCourseName;
+                    var classCode = findClassCode(allTokens, meta.code);
+                    var courseName = meta.name;
                     var teacher = extractTeachers(el, courseName);
                     
                     if (classCode || courseName) {
