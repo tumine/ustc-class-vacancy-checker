@@ -196,7 +196,7 @@ private fun CourseResultItem(
         ) {
             // 课程名
             Text(
-                text = course.courseName.ifBlank { "（未知课程名）" },
+                text = course.courseName.ifBlank { "（未知课程名）" }.replace("\n", " ").replace(Regex("\\s+"), " ").trim(),
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis

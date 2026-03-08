@@ -236,33 +236,45 @@ object CatalogScriptUtils {
                 }
                 
                 function extractFromCells(cells) {
-                    // 尝试从表格单元格中提取课堂号、课程名、教师
                     var texts = [];
+                    var courseNameElement = null;
+                    var courseCodeElement = null;
+
                     for (var i = 0; i < cells.length; i++) {
                         texts.push((cells[i].innerText || '').trim());
+                        var cnElem = cells[i].querySelector('.course-name');
+                        if (cnElem) {
+                            courseNameElement = cnElem;
+                        } else if (cells[i].classList.contains('course-name')) {
+                            courseNameElement = cells[i];
+                        }
+                        
+                        var ccElem = cells[i].querySelector('.course-code');
+                        if (ccElem) {
+                            courseCodeElement = ccElem;
+                        } else if (cells[i].classList.contains('course-code')) {
+                            courseCodeElement = cells[i];
+                        }
                     }
                     
-                    // 查找课堂号（纯数字字段）
                     var classCode = '';
                     var courseName = '';
                     var teacher = '';
                     
-                    for (var t = 0; t < texts.length; t++) {
-                        if (/^\d{4,}$/.test(texts[t]) && !classCode) {
-                            classCode = texts[t];
+                    if (courseCodeElement) {
+                        classCode = (courseCodeElement.innerText || '').trim();
+                    } else {
+                        for (var t = 0; t < texts.length; t++) {
+                            if (/^\d{4,}$/.test(texts[t]) && !classCode) {
+                                classCode = texts[t];
+                            }
                         }
                     }
                     
-                    // 课程名通常是最长的中文文本
-                    var maxLen = 0;
-                    for (var n = 0; n < texts.length; n++) {
-                        if (texts[n].length > maxLen && /[\u4e00-\u9fa5]/.test(texts[n]) && texts[n] !== classCode) {
-                            maxLen = texts[n].length;
-                            courseName = texts[n];
-                        }
+                    if (courseNameElement) {
+                        courseName = (courseNameElement.innerText || '').trim();
                     }
                     
-                    // 教师名通常是2-4个汉字
                     for (var p = 0; p < texts.length; p++) {
                         if (/^[\u4e00-\u9fa5]{2,4}$/.test(texts[p]) && texts[p] !== courseName) {
                             teacher = texts[p];
@@ -277,21 +289,32 @@ object CatalogScriptUtils {
                 }
                 
                 function extractFromCard(card) {
-                    var text = (card.innerText || '').trim();
-                    if (!text) return null;
+                    var courseNameElement = card.querySelector('.course-name');
+                    var extCourseName = '';
+                    if (courseNameElement) {
+                        extCourseName = (courseNameElement.innerText || '').trim();
+                    }
                     
-                    // 从卡片文本中提取
-                    var codeMatch = text.match(/(?:课堂号|编号|code)[：:\s]*(\d{4,})/i) || text.match(/\b(\d{4,})\b/);
-                    var classCode = codeMatch ? codeMatch[1] : '';
+                    var courseCodeElement = card.querySelector('.course-code');
+                    var extCourseCode = '';
+                    if (courseCodeElement) {
+                        extCourseCode = (courseCodeElement.innerText || '').trim();
+                    }
+
+                    var text = (card.innerText || '').trim();
+                    if (!text && !extCourseName && !extCourseCode) return null;
+                    
+                    var classCode = extCourseCode;
+                    if (!classCode) {
+                        var codeMatch = text.match(/(?:课堂号|编号|code)[：:\s]*(\d{4,})/i) || text.match(/\b(\d{4,})\b/);
+                        classCode = codeMatch ? codeMatch[1] : '';
+                    }
                     
                     var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l; });
-                    var courseName = '';
+                    var courseName = extCourseName;
                     var teacher = '';
                     
                     for (var i = 0; i < lines.length; i++) {
-                        if (lines[i].length > courseName.length && /[\u4e00-\u9fa5]/.test(lines[i]) && !/^\d+$/.test(lines[i])) {
-                            courseName = lines[i];
-                        }
                         if (/^[\u4e00-\u9fa5]{2,4}$/.test(lines[i])) {
                             teacher = lines[i];
                         }
@@ -304,29 +327,43 @@ object CatalogScriptUtils {
                 }
                 
                 function extractFromGeneric(el) {
+                    var courseNameElement = el.querySelector('.course-name');
+                    var extCourseName = '';
+                    if (courseNameElement) {
+                        extCourseName = (courseNameElement.innerText || '').trim();
+                    }
+                    
+                    var courseCodeElement = el.querySelector('.course-code');
+                    var extCourseCode = '';
+                    if (courseCodeElement) {
+                        extCourseCode = (courseCodeElement.innerText || '').trim();
+                    }
+
                     var text = (el.innerText || '').trim();
-                    if (!text || text.length < 4 || text.length > 500) return null;
+                    if (!text && !extCourseName && !extCourseCode) return null;
+                    if (text && text.length < 4 && !extCourseName && !extCourseCode) return null;
+                    if (text && text.length > 500 && !extCourseName && !extCourseCode) return null;
                     
-                    var codeMatch = text.match(/\b(\d{4,})\b/);
-                    if (!codeMatch) return null;
+                    var classCode = extCourseCode;
+                    if (!classCode) {
+                        var codeMatch = text.match(/\b(\d{4,})\b/);
+                        if (!codeMatch) return null;
+                        classCode = codeMatch[1];
+                    }
                     
-                    var classCode = codeMatch[1];
                     var remaining = text.replace(classCode, '').trim();
+                    var parts = remaining.split(/[\s\t,，|]+/).filter(function(p) { return p.length > 0; });
                     
-                    var parts = remaining.split(/[\s\t,，|/]+/).filter(function(p) { return p.length > 0; });
-                    var courseName = '';
+                    var courseName = extCourseName;
                     var teacher = '';
                     
                     for (var i = 0; i < parts.length; i++) {
-                        if (parts[i].length > courseName.length && /[\u4e00-\u9fa5]/.test(parts[i])) {
-                            courseName = parts[i];
-                        }
                         if (/^[\u4e00-\u9fa5]{2,4}$/.test(parts[i]) && parts[i] !== courseName) {
                             teacher = parts[i];
                         }
                     }
                     
-                    if (courseName) {
+                    if (classCode || courseName) {
                         return { classCode: classCode, courseName: courseName, teacher: teacher };
                     }
                     return null;
