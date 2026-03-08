@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -19,9 +20,20 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun CourseCheckScreen(
     onNavigateToSettings: () -> Unit,
+    onNavigateToCourseLookup: () -> Unit = {},
+    selectedClassCode: String? = null,
+    onSelectedClassCodeConsumed: () -> Unit = {},
     viewModel: CourseCheckViewModel = hiltViewModel()
 ) {
     val uiState = viewModel.uiState
+
+    // 接收从 CourseLookup 页面返回的课堂号
+    LaunchedEffect(selectedClassCode) {
+        if (!selectedClassCode.isNullOrBlank()) {
+            viewModel.updateClassCode(selectedClassCode)
+            onSelectedClassCodeConsumed()
+        }
+    }
     
     // 如果正在查询，显示 WebView
     if (uiState.showWebView) {
@@ -83,6 +95,22 @@ fun CourseCheckScreen(
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 查找课堂号按钮
+            OutlinedButton(
+                onClick = onNavigateToCourseLookup,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ManageSearch,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("按关键字查找课堂号")
+            }
             
             Spacer(modifier = Modifier.height(24.dp))
             
@@ -166,3 +194,4 @@ fun CourseCheckScreen(
         }
     }
 }
+
