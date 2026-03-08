@@ -170,8 +170,53 @@ object CatalogScriptUtils {
                     try { AndroidBridge.logDomInfo(msg); } catch(e) { console.log(msg); }
                 }
                 
+                function getTokens(el, stripTags) {
+                    if (!el) return [];
+                    var clone = el.cloneNode(true);
+                    if (stripTags) {
+                        var tagEls = clone.querySelectorAll('.el-tag, .tag, .badge, [class*="tag"], [class*="badge"], [class*="label"]');
+                        for (var i = 0; i < tagEls.length; i++) {
+                            tagEls[i].parentNode.removeChild(tagEls[i]);
+                        }
+                    }
+                    var safeHtml = (clone.innerHTML || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ');
+                    var temp = document.createElement('div');
+                    temp.innerHTML = safeHtml;
+                    var text = temp.textContent || temp.innerText || '';
+                    return text.split(/[\s\t\n,，|]+/).filter(function(p) { return p.length > 0; });
+                }
+                
+                function extractTeachers(el, courseName) {
+                    var tokens = getTokens(el, true);
+                    var teachers = [];
+                    var blacklist = [
+                        '理论课', '实验课', '讨论课', '上机课', '大课', '小课',
+                        '中文', '英文', '双语', '英语', '日语', '法语', '德语',
+                        '笔试', '机考', '开卷', '闭卷',
+                        '秋季', '春季', '夏季', '冬季',
+                        '选修', '必修', '公选', '专业', '通识', '核心', '基础',
+                        '本科', '硕士', '博士', '研究生',
+                        '学分', '学时', '周学时',
+                        '计划内', '自由',
+                        '数学系', '物理系', '化学系', '生物系', '计算机', '电子系',
+                        '天文系', '地球', '材料系', '力学系', '光学',
+                        '文学系', '历史系', '哲学系', '管理系', '经济系',
+                        '天文学系', '信息学院', '工程学院', '理学院',
+                        '统计与', '金融系'
+                    ];
+                    for (var i = 0; i < tokens.length; i++) {
+                        var t = tokens[i];
+                        if (/^[\u4e00-\u9fa5]{2,4}$/.test(t) && t !== courseName && teachers.indexOf(t) === -1) {
+                            if (blacklist.indexOf(t) === -1 && !/系$/.test(t) && !/学院$/.test(t) && !/课$/.test(t)) {
+                                teachers.push(t);
+                            }
+                        }
+                    }
+                    return teachers.join(',');
+                }
+                
                 function tryExtract() {
-                    // 首先检测是否有加指示器
+                    // 首先检测是否有加载指示器
                     var loadingElements = document.querySelectorAll('.el-loading-mask, .ant-spin, .loading, [class*="loading"]');
                     var isSpinnerVisible = Array.from(loadingElements).some(function(el) {
                         var style = window.getComputedStyle(el);
@@ -212,7 +257,7 @@ object CatalogScriptUtils {
                         }
                     }
                     
-                    // 策略3: 通用提取 - 根据文本模式匹配（课堂号通常是纯数字）
+                    // 策略3: 通用提取 - 根据文本模式匹配
                     if (results.length === 0) {
                         var allRows = document.querySelectorAll('tr, [class*="row"], [class*="item"]');
                         logDom("Fallback: scanning " + allRows.length + " generic rows/items");
@@ -222,13 +267,21 @@ object CatalogScriptUtils {
                         }
                     }
                     
-                    // 如果找到结果，或者没有加载动画并且已经尝试了足够的次数(比如至少延时了3秒)，才返回
-                    if (results.length > 0) {
-                        logDom("Extracted " + results.length + " courses");
-                        try { AndroidBridge.onSearchResults(JSON.stringify(results)); } catch(e) {}
+                    var uniqueResults = [];
+                    var seenCodes = {};
+                    for (var r = 0; r < results.length; r++) {
+                        var c = results[r];
+                        if (c.classCode && !seenCodes[c.classCode]) {
+                            seenCodes[c.classCode] = true;
+                            uniqueResults.push(c);
+                        }
+                    }
+                    
+                    if (uniqueResults.length > 0) {
+                        logDom("Extracted " + uniqueResults.length + " unique courses");
+                        try { AndroidBridge.onSearchResults(JSON.stringify(uniqueResults)); } catch(e) {}
                         return true;
                     } else if (attempts > 5) {
-                        // 如果多次尝试仍无结果，且页面未在加载，可能真的没有结果，继续重试直到超时
                         logDom("No results found yet, attempt " + attempts);
                     }
                     
@@ -236,12 +289,14 @@ object CatalogScriptUtils {
                 }
                 
                 function extractFromCells(cells) {
-                    var texts = [];
+                    var allTokens = [];
                     var courseNameElement = null;
                     var courseCodeElement = null;
+                    var row = cells[0] ? cells[0].parentNode : null;
 
                     for (var i = 0; i < cells.length; i++) {
-                        texts.push((cells[i].innerText || '').trim());
+                        allTokens = allTokens.concat(getTokens(cells[i], false));
+                        
                         var cnElem = cells[i].querySelector('.course-name');
                         if (cnElem) {
                             courseNameElement = cnElem;
@@ -259,14 +314,15 @@ object CatalogScriptUtils {
                     
                     var classCode = '';
                     var courseName = '';
-                    var teacher = '';
                     
                     if (courseCodeElement) {
                         classCode = (courseCodeElement.innerText || '').trim();
                     } else {
-                        for (var t = 0; t < texts.length; t++) {
-                            if (/^\d{4,}$/.test(texts[t]) && !classCode) {
-                                classCode = texts[t];
+                        for (var t = 0; t < allTokens.length; t++) {
+                            if (!classCode && (/^[A-Z0-9\.]+$/.test(allTokens[t]) && /\d{4}/.test(allTokens[t]))) {
+                                classCode = allTokens[t];
+                            } else if (!classCode && /^\d{4,}$/.test(allTokens[t])) {
+                                classCode = allTokens[t];
                             }
                         }
                     }
@@ -275,12 +331,7 @@ object CatalogScriptUtils {
                         courseName = (courseNameElement.innerText || '').trim();
                     }
                     
-                    for (var p = 0; p < texts.length; p++) {
-                        if (/^[\u4e00-\u9fa5]{2,4}$/.test(texts[p]) && texts[p] !== courseName) {
-                            teacher = texts[p];
-                            break;
-                        }
-                    }
+                    var teacher = row ? extractTeachers(row, courseName) : '';
                     
                     if (classCode || courseName) {
                         return { classCode: classCode, courseName: courseName, teacher: teacher };
@@ -301,24 +352,23 @@ object CatalogScriptUtils {
                         extCourseCode = (courseCodeElement.innerText || '').trim();
                     }
 
-                    var text = (card.innerText || '').trim();
-                    if (!text && !extCourseName && !extCourseCode) return null;
+                    var allTokens = getTokens(card);
+                    
+                    if (allTokens.length === 0 && !extCourseName && !extCourseCode) return null;
                     
                     var classCode = extCourseCode;
                     if (!classCode) {
-                        var codeMatch = text.match(/(?:课堂号|编号|code)[：:\s]*(\d{4,})/i) || text.match(/\b(\d{4,})\b/);
-                        classCode = codeMatch ? codeMatch[1] : '';
-                    }
-                    
-                    var lines = text.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l; });
-                    var courseName = extCourseName;
-                    var teacher = '';
-                    
-                    for (var i = 0; i < lines.length; i++) {
-                        if (/^[\u4e00-\u9fa5]{2,4}$/.test(lines[i])) {
-                            teacher = lines[i];
+                        for (var t = 0; t < allTokens.length; t++) {
+                            if (!classCode && (/^[A-Z0-9\.]+$/.test(allTokens[t]) && /\d{4}/.test(allTokens[t]))) {
+                                classCode = allTokens[t];
+                            } else if (!classCode && /^\d{4,}$/.test(allTokens[t])) {
+                                classCode = allTokens[t];
+                            }
                         }
                     }
+                    
+                    var courseName = extCourseName;
+                    var teacher = extractTeachers(card, courseName);
                     
                     if (classCode || courseName) {
                         return { classCode: classCode, courseName: courseName, teacher: teacher };
@@ -339,29 +389,24 @@ object CatalogScriptUtils {
                         extCourseCode = (courseCodeElement.innerText || '').trim();
                     }
 
-                    var text = (el.innerText || '').trim();
-                    if (!text && !extCourseName && !extCourseCode) return null;
-                    if (text && text.length < 4 && !extCourseName && !extCourseCode) return null;
-                    if (text && text.length > 500 && !extCourseName && !extCourseCode) return null;
+                    var allTokens = getTokens(el);
+                    
+                    if (allTokens.length === 0 && !extCourseName && !extCourseCode) return null;
+                    if (allTokens.length < 2 && !extCourseName && !extCourseCode) return null;
                     
                     var classCode = extCourseCode;
                     if (!classCode) {
-                        var codeMatch = text.match(/\b(\d{4,})\b/);
-                        if (!codeMatch) return null;
-                        classCode = codeMatch[1];
-                    }
-                    
-                    var remaining = text.replace(classCode, '').trim();
-                    var parts = remaining.split(/[\s\t,，|]+/).filter(function(p) { return p.length > 0; });
-                    
-                    var courseName = extCourseName;
-                    var teacher = '';
-                    
-                    for (var i = 0; i < parts.length; i++) {
-                        if (/^[\u4e00-\u9fa5]{2,4}$/.test(parts[i]) && parts[i] !== courseName) {
-                            teacher = parts[i];
+                        for (var t = 0; t < allTokens.length; t++) {
+                            if (!classCode && (/^[A-Z0-9\.]+$/.test(allTokens[t]) && /\d{4}/.test(allTokens[t]))) {
+                                classCode = allTokens[t];
+                            } else if (!classCode && /^\d{4,}$/.test(allTokens[t])) {
+                                classCode = allTokens[t];
+                            }
                         }
                     }
+                    
+                    var courseName = extCourseName;
+                    var teacher = extractTeachers(el, courseName);
                     
                     if (classCode || courseName) {
                         return { classCode: classCode, courseName: courseName, teacher: teacher };
