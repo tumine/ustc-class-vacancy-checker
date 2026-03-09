@@ -157,8 +157,10 @@ class CourseLookupViewModel @Inject constructor(
                     showSuccessMessage = "成功添加 ${coursesToTrack.size} 门课程到后台跟踪列表"
                 )
                 
-                // 立即执行一次余量查询（直接在协程中调用，不通过 WorkManager）
-                performImmediateCheck(coursesToTrack)
+                // 立即执行一次余量查询，放在 GlobalScope 中防止页面销毁导致查询被取消
+                kotlinx.coroutines.GlobalScope.launch {
+                    performImmediateCheck(coursesToTrack)
+                }
             } catch (e: Exception) {
                 Log.e("CourseLookup", "Failed to add courses to tracking", e)
                 uiState = uiState.copy(errorMessage = "加入跟踪失败: ${e.message}")
