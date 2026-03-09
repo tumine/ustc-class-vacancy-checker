@@ -284,6 +284,20 @@ object CourseCheckScriptUtils {
                 ).set;
                 
                 function setNativeValue(element, value) {
+                    element.focus();
+                    
+                    // 先尝试清理之前的内容
+                    nativeSetter.call(element, '');
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    
+                    try {
+                        var clearBtn = element.parentElement.querySelector('.el-input__clear, .ant-input-clear-icon, .clear-icon, i[class*="close"], i[class*="clear"]');
+                        if (clearBtn && clearBtn.offsetWidth > 0) {
+                            clearBtn.click();
+                        }
+                    } catch(e) {}
+                    
+                    // 重新填入新值
                     nativeSetter.call(element, value);
                     element.dispatchEvent(new Event('input', { bubbles: true }));
                     element.dispatchEvent(new Event('change', { bubbles: true }));
@@ -314,11 +328,15 @@ object CourseCheckScriptUtils {
                     // Step 2: 延迟后在搜索框中输入课堂号
                     setTimeout(function() {
                         // TODO: 根据实际页面 DOM 结构更新选择器
-                        var searchInput = document.querySelector('input[placeholder*="关键词"]')
-                            || document.querySelector('input[placeholder*="搜索"]')
-                            || document.querySelector('input[type="search"]')
-                            || document.querySelector('.search-input input')
-                            || document.querySelector('input.form-control');
+                        var inputs = document.querySelectorAll('input[placeholder*="关键词"], input[placeholder*="搜索"], input[type="search"], .search-input input, input.form-control, input.el-input__inner');
+                        var searchInput = null;
+                        for (var i = 0; i < inputs.length; i++) {
+                            // Find the first visible input
+                            if (inputs[i].offsetWidth > 0 || inputs[i].offsetHeight > 0 || inputs[i].getClientRects().length > 0) {
+                                searchInput = inputs[i];
+                                break;
+                            }
+                        }
                         
                         if (searchInput) {
                             console.log("Found search input, typing class code: $safeCode");
@@ -331,15 +349,26 @@ object CourseCheckScriptUtils {
                                 searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
                                 
                                 // 也尝试点击搜索按钮
-                                var searchBtn = document.querySelector('.search-btn, button[type="submit"], .btn-search');
-                                if (searchBtn) searchBtn.click();
+                                var buttons = document.querySelectorAll('.search-btn, button[type="submit"], .btn-search, button.el-button--primary, button.ant-btn-primary');
+                                for (var b = 0; b < buttons.length; b++) {
+                                     if (buttons[b].offsetWidth > 0) {
+                                         var btnText = (buttons[b].innerText || '').trim();
+                                         if (btnText === '查询' || btnText === '搜索' || !!buttons[b].querySelector('i[class*="search"]')) {
+                                              buttons[b].click();
+                                              break;
+                                         } else if ((buttons[b].className || '').indexOf('search') !== -1) {
+                                              buttons[b].click();
+                                              break;
+                                         }
+                                     }
+                                }
                                 
                                 console.log("Search triggered, notifying Android...");
-                                try { AndroidBridge.onSearchComplete(); } catch(e) {}
+                                try { AndroidBridge.onSearchComplete("$safeCode"); } catch(e) {}
                             }, 500);
                         } else {
                             console.log("Search input not found");
-                            try { AndroidBridge.onCourseNotFound(); } catch(e) {}
+                            try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                         }
                     }, 1000);
                     
@@ -351,7 +380,7 @@ object CourseCheckScriptUtils {
                     if (trySearchCourse() || attempts >= maxAttempts) {
                         clearInterval(intervalId);
                         if (attempts >= maxAttempts) {
-                            try { AndroidBridge.onCourseNotFound(); } catch(e) {}
+                            try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                         }
                     }
                 }, 500);
@@ -390,7 +419,7 @@ object CourseCheckScriptUtils {
                     if (!targetRow) {
                         if (attempts >= maxAttempts - 1) {
                             console.log("Course with code '$safeCode' not found");
-                            try { AndroidBridge.onCourseNotFound(); } catch(e) {}
+                            try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                         }
                         return false;
                     }
@@ -406,7 +435,7 @@ object CourseCheckScriptUtils {
                         var stdCount = parseInt(stdCountEl.innerText.trim()) || 0;
                         var limitCount = parseInt(limitCountEl.innerText.trim()) || 0;
                         console.log("Vacancy data: " + stdCount + "/" + limitCount);
-                        try { AndroidBridge.onVacancyResult(stdCount, limitCount); } catch(e) {}
+                        try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount); } catch(e) {}
                         return true;
                     }
                     
@@ -419,14 +448,14 @@ object CourseCheckScriptUtils {
                             var stdCount = parseInt(match[1]);
                             var limitCount = parseInt(match[2]);
                             console.log("Vacancy data (parsed): " + stdCount + "/" + limitCount);
-                            try { AndroidBridge.onVacancyResult(stdCount, limitCount); } catch(e) {}
+                            try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount); } catch(e) {}
                             return true;
                         }
                     }
                     
                     console.log("Could not find vacancy data in course row");
                     if (attempts >= maxAttempts - 1) {
-                        try { AndroidBridge.onCourseNotFound(); } catch(e) {}
+                        try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                     }
                     return false;
                 }
@@ -438,7 +467,9 @@ object CourseCheckScriptUtils {
                     }
                 }, 500);
                 
-                tryReadVacancy();
+                if (tryReadVacancy()) {
+                    clearInterval(intervalId);
+                }
             })();
         """.trimIndent()
     }

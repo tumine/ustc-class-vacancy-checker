@@ -110,7 +110,7 @@ fun WebViewCourseCheckScreen(
                         }
                         
                         @JavascriptInterface
-                        fun onSearchComplete() {
+                        fun onSearchComplete(code: String) {
                             Log.d("CourseCheck", "Search complete, reading vacancy...")
                             hasSearched = true
                             // 搜索完成后，读取余量数据
@@ -121,13 +121,13 @@ fun WebViewCourseCheckScreen(
                         }
                         
                         @JavascriptInterface
-                        fun onVacancyResult(stdCount: Int, limitCount: Int) {
+                        fun onVacancyResult(code: String, stdCount: Int, limitCount: Int) {
                             Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount")
                             post { onVacancyResult(stdCount, limitCount) }
                         }
                         
                         @JavascriptInterface
-                        fun onCourseNotFound() {
+                        fun onCourseNotFound(code: String) {
                             Log.d("CourseCheck", "Course not found")
                             post { onCourseNotFound() }
                         }

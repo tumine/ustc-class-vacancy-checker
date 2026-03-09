@@ -137,34 +137,37 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     }
                                     
                                     @JavascriptInterface
-                                    fun onSearchComplete() {
+                                    fun onSearchComplete(code: String) {
                                         Log.d(TAG, "Search complete, reading vacancy...")
                                         mainHandler.post {
-                                            val code = classCodes[currentCourseIndex]
-                                            val js = CourseCheckScriptUtils.getReadVacancyScript(code)
-                                            evaluateJavascript(js, null)
+                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
+                                                val js = CourseCheckScriptUtils.getReadVacancyScript(code)
+                                                webView?.evaluateJavascript(js, null)
+                                            }
                                         }
                                     }
                                     
                                     @JavascriptInterface
-                                    fun onVacancyResult(stdCount: Int, limitCount: Int) {
+                                    fun onVacancyResult(code: String, stdCount: Int, limitCount: Int) {
                                         Log.d(TAG, "Vacancy result: $stdCount/$limitCount")
                                         mainHandler.post {
-                                            val code = classCodes[currentCourseIndex]
-                                            resultMap[code] = maxOf(0, limitCount - stdCount)
-                                            currentCourseIndex++
-                                            checkNextCourse()
+                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
+                                                resultMap[code] = maxOf(0, limitCount - stdCount)
+                                                currentCourseIndex++
+                                                checkNextCourse()
+                                            }
                                         }
                                     }
                                     
                                     @JavascriptInterface
-                                    fun onCourseNotFound() {
+                                    fun onCourseNotFound(code: String) {
                                         Log.w(TAG, "Course not found")
                                         mainHandler.post {
-                                            val code = classCodes[currentCourseIndex]
-                                            // 没找到则直接继续下一门课，不报错
-                                            currentCourseIndex++
-                                            checkNextCourse()
+                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
+                                                // 没找到则直接继续下一门课，不报错
+                                                currentCourseIndex++
+                                                checkNextCourse()
+                                            }
                                         }
                                     }
                                 }, "AndroidBridge")
