@@ -61,6 +61,10 @@ class LoginViewModel @Inject constructor(
         checkHasCredentials()
     }
 
+    fun setErrorMessage(message: String?) {
+        uiState = uiState.copy(errorMessage = message)
+    }
+
     fun logout() {
         credentialsManager.clearCredentials()
         uiState = LoginUiState()

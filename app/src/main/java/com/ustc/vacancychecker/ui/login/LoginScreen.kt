@@ -43,6 +43,7 @@ fun LoginScreen(
             onLoginError = {
                 // 登录失败（密码错误），清除凭证并重新显示输入框
                 viewModel.clearCredentials()
+                viewModel.setErrorMessage("用户名或密码错误 / Incorrect user name or password")
                 showWebViewLogin = false
                 showCredentialInput = true
             },
@@ -120,12 +121,15 @@ fun LoginScreen(
         
         if (showCredentialInput) {
             CredentialInputDialog(
+                errorMessage = uiState.errorMessage,
                 onConfirm = { username, password ->
+                    viewModel.setErrorMessage(null) // clear error before next attempt
                     viewModel.saveCredentials(username, password)
                     showCredentialInput = false
                     showWebViewLogin = true
                 },
                 onDismiss = {
+                    viewModel.setErrorMessage(null) // clear error when dismissing
                     showCredentialInput = false
                 }
             )
@@ -135,6 +139,7 @@ fun LoginScreen(
 
 @Composable
 fun CredentialInputDialog(
+    errorMessage: String? = null,
     onConfirm: (String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -147,6 +152,25 @@ fun CredentialInputDialog(
         title = { Text("输入统一身份认证账号") },
         text = {
             Column {
+                // 显示错误原因
+                errorMessage?.let { msg ->
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+                
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
