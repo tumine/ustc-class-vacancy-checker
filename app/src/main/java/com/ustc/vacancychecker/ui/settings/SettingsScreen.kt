@@ -21,7 +21,11 @@ fun SettingsScreen(
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
-    val intervalOptions = listOf(5, 10, 15, 30, 60)
+    val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
+        listOf(1, 5, 10, 15, 30, 60)
+    } else {
+        listOf(5, 10, 15, 30, 60)
+    }
     var expanded by remember { mutableStateOf(false) }
     
     Scaffold(

@@ -203,7 +203,15 @@ class CourseLookupViewModel @Inject constructor(
                 val stdCount = item.optInt("stdCount", 0)
                 val limitCount = item.optInt("limitCount", 0)
                 if (code.isNotBlank()) {
-                    vacancyMap[code] = maxOf(0, limitCount - stdCount)
+                    val vacancy = maxOf(0, limitCount - stdCount)
+                    vacancyMap[code] = vacancy
+                    
+                    val courseObj = item.optJSONObject("course")
+                    val courseCode = courseObj?.optString("code", "") ?: ""
+                    if (courseCode.isNotBlank()) {
+                        val existing = vacancyMap[courseCode] ?: 0
+                        vacancyMap[courseCode] = maxOf(existing, vacancy)
+                    }
                 }
             }
 

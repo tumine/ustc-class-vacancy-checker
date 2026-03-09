@@ -6,20 +6,44 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.ustc.vacancychecker.data.local.CourseRepository
+import com.ustc.vacancychecker.data.local.CredentialsManager
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.delay
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONArray
-import kotlin.random.Random
 
 @HiltWorker
 class ClassVacancyWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val repository: CourseRepository
+    private val repository: CourseRepository,
+    private val credentialsManager: CredentialsManager,
+    private val bgJwChecker: BackgroundJwVacancyChecker
 ) : CoroutineWorker(appContext, workerParams) {
+
+    companion object {
+        const val WORK_NAME = "VacancyCheckWork"
+        private const val KEY_SCHEDULE_NEXT = "schedule_next"
+        private const val KEY_INTERVAL_MINUTES = "interval_minutes"
+
+        fun buildOneTimeRequest(intervalMinutes: Long, recursive: Boolean = true): androidx.work.OneTimeWorkRequest {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
+            val data = androidx.work.workDataOf(
+                KEY_SCHEDULE_NEXT to recursive,
+                KEY_INTERVAL_MINUTES to intervalMinutes
+            )
+
+            // If interval is 0, start immediately, otherwise wait for intervalMinutes
+            val delayMs = if (intervalMinutes > 0) intervalMinutes * 60 * 1000 else 0
+
+            return androidx.work.OneTimeWorkRequest.Builder(ClassVacancyWorker::class.java)
+                .setConstraints(constraints)
+                .setInitialDelay(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .setInputData(data)
+                .build()
+        }
+    }
 
     override suspend fun doWork(): Result {
         val courses = repository.getTrackedCourses().filter { it.isMonitoring }
@@ -30,73 +54,55 @@ class ClassVacancyWorker @AssistedInject constructor(
         Log.d("ClassVacancyWorker", "Starting background check for ${courses.size} courses")
 
         try {
-            // 目前使用 catalog 系统的接口作为检查源，其学期ID目前通过 catalog 硬编码为 421 (2026春)，
-            // 真实情况可从 https://catalog.ustc.edu.cn/api/teach/semester/list 获取
-            val semesterId = "421" 
-            val url = "https://catalog.ustc.edu.cn/api/teach/lesson/list-for-teach/$semesterId"
-
-            val client = OkHttpClient.Builder()
-                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-
-            val request = Request.Builder()
-                .url(url)
-                // 增加常规UA防止简单的拦截
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .header("Accept", "application/json, text/plain, */*")
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Log.e("ClassVacancyWorker", "API Request failed with code: ${response.code}")
-                repository.updateCheckTimeForCourses(courses.map { it.courseId })
-                return Result.retry()
+            val username = credentialsManager.getUsername()
+            val password = credentialsManager.getPassword()
+            if (username == null || password == null) {
+                Log.e("ClassVacancyWorker", "No credentials available for JW check")
+                return Result.failure()
             }
 
-            val responseBody = response.body?.string()
-            if (responseBody.isNullOrBlank()) {
-                Log.e("ClassVacancyWorker", "Empty response from API")
-                repository.updateCheckTimeForCourses(courses.map { it.courseId })
-                return Result.retry()
-            }
+            val classCodes = courses.map { it.courseId }
+            val result = bgJwChecker.performCheck(classCodes, username, password)
 
-            // 解析 catalog.ustc.edu.cn 的返回 JSON 数组
-            val jsonArray = JSONArray(responseBody)
-            val vacancyMap = mutableMapOf<String, Int>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-                val code = item.optString("code", "")
-                val stdCount = item.optInt("stdCount", 0)
-                val limitCount = item.optInt("limitCount", 0)
-                
-                if (code.isNotBlank()) {
-                    val vacancy = maxOf(0, limitCount - stdCount)
-                    vacancyMap[code] = vacancy
-                }
-            }
-
-            for (course in courses) {
-                val vacancy = vacancyMap[course.courseId]
-                if (vacancy != null) {
-                    Log.d("ClassVacancyWorker", "Check ${course.courseId}: $vacancy vacancy available")
-                    repository.updateCourseStatus(course.courseId, vacancy)
-                    
-                    // 如果发现空位，发送警报并启动选课（结合下一阶段 TODO 1）
-                    if (vacancy > 0) {
-                        sendVacancyNotification(course.courseId, course.courseName, vacancy)
+            if (result.isSuccess) {
+                val vacancyMap = result.getOrThrow()
+                for (course in courses) {
+                    val vacancy = vacancyMap[course.courseId]
+                    if (vacancy != null) {
+                        Log.d("ClassVacancyWorker", "Check ${course.courseId}: $vacancy vacancy available")
+                        repository.updateCourseStatus(course.courseId, vacancy)
+                        
+                        if (vacancy > 0) {
+                            sendVacancyNotification(course.courseId, course.courseName, vacancy)
+                        }
+                    } else {
+                        Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in jw data")
+                        repository.updateCourseStatus(course.courseId, null)
                     }
-                } else {
-                    Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in catalog data")
-                    repository.updateCourseStatus(course.courseId, null)
                 }
+            } else {
+                Log.e("ClassVacancyWorker", "Background JW check failed", result.exceptionOrNull())
+                repository.updateCheckTimeForCourses(classCodes)
+                return Result.retry()
             }
 
         } catch (e: Exception) {
             Log.e("ClassVacancyWorker", "Error while fetching vacancy data", e)
             repository.updateCheckTimeForCourses(courses.map { it.courseId })
             return Result.retry()
+        } finally {
+            val scheduleNext = inputData.getBoolean(KEY_SCHEDULE_NEXT, false)
+            val intervalMinutes = inputData.getLong(KEY_INTERVAL_MINUTES, 0)
+            
+            if (!isStopped && scheduleNext && intervalMinutes > 0) {
+                Log.d("ClassVacancyWorker", "Scheduling next check in $intervalMinutes minutes")
+                val nextRequest = buildOneTimeRequest(intervalMinutes, true)
+                androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork(
+                    WORK_NAME,
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    nextRequest
+                )
+            }
         }
 
         return Result.success()
