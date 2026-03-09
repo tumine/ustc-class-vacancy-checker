@@ -109,8 +109,10 @@ fun CourseCheckScreen(
                 leadingIcon = {
                     Icon(Icons.Filled.Search, contentDescription = null)
                 },
+                visualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
+                    keyboardType = KeyboardType.Password,
+                    autoCorrect = false,
                     imeAction = ImeAction.Search
                 ),
                 keyboardActions = KeyboardActions(
