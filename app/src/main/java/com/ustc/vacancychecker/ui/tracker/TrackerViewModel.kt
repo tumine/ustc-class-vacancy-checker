@@ -36,9 +36,9 @@ class TrackerViewModel @Inject constructor(
     }
 
     fun refreshAll(context: android.content.Context) {
-        val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.ustc.vacancychecker.data.worker.ClassVacancyWorker>().build()
+        val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildOneTimeRequest(intervalMinutes = 0, recursive = false)
         androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
-            "ManualVacancyCheck",
+            com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME,
             androidx.work.ExistingWorkPolicy.REPLACE,
             workRequest
         )

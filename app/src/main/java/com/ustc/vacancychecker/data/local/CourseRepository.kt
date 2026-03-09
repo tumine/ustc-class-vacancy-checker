@@ -35,7 +35,12 @@ class CourseRepository @Inject constructor(
     val trackedCoursesFlow: Flow<List<TrackedCourse>> = context.dataStore.data.map { preferences ->
         val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
         val type = object : TypeToken<List<TrackedCourse>>() {}.type
-        gson.fromJson(jsonString, type)
+        try {
+            gson.fromJson(jsonString, type)
+        } catch (e: com.google.gson.JsonSyntaxException) {
+            android.util.Log.e("CourseRepository", "Failed to parse tracked courses, resetting", e)
+            emptyList()
+        }
     }
     val monitoringIntervalFlow: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[MONITORING_INTERVAL_KEY] ?: 15

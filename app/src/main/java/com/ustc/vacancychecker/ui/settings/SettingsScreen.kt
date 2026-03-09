@@ -137,7 +137,7 @@ fun SettingsScreen(
             
             // 版本信息
             Text(
-                text = "USTC 选课余量检测 v1.0.0",
+                text = "USTC 选课余量检测 v${com.ustc.vacancychecker.BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally)

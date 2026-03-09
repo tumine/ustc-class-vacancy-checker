@@ -77,7 +77,7 @@ class ClassVacancyWorker @AssistedInject constructor(
                         }
                     } else {
                         Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in jw data")
-                        repository.updateCourseStatus(course.courseId, null)
+                        repository.updateCourseStatus(course.courseId, 0)
                     }
                 }
             } else {
