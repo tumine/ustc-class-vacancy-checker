@@ -124,7 +124,10 @@ fun CourseLookupScreen(
                     leadingIcon = {
                         Icon(Icons.Filled.Search, contentDescription = null)
                     },
+                    visualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                        autoCorrect = false,
                         imeAction = ImeAction.Search
                     ),
                     keyboardActions = KeyboardActions(
