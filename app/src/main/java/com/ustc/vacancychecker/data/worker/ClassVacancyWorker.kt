@@ -43,6 +43,27 @@ class ClassVacancyWorker @AssistedInject constructor(
                 .setInputData(data)
                 .build()
         }
+
+        /**
+         * Builds a request that starts immediately but, after completing, re-schedules
+         * the periodic chain using nextIntervalMinutes as the delay for subsequent runs.
+         * @param nextIntervalMinutes interval in minutes for subsequent periodic runs (0 to disable re-scheduling)
+         */
+        fun buildImmediateOneTimeRequest(nextIntervalMinutes: Long): androidx.work.OneTimeWorkRequest {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
+            val data = androidx.work.workDataOf(
+                KEY_SCHEDULE_NEXT to (nextIntervalMinutes > 0),
+                KEY_INTERVAL_MINUTES to nextIntervalMinutes
+            )
+
+            return androidx.work.OneTimeWorkRequest.Builder(ClassVacancyWorker::class.java)
+                .setConstraints(constraints)
+                .setInputData(data)
+                .build()
+        }
     }
 
     override suspend fun doWork(): Result {
@@ -77,7 +98,7 @@ class ClassVacancyWorker @AssistedInject constructor(
                         }
                     } else {
                         Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in jw data")
-                        repository.updateCourseStatus(course.courseId, null)
+                        repository.updateCourseStatus(course.courseId, 0)
                     }
                 }
             } else {

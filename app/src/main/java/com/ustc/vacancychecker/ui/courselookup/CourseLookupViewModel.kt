@@ -157,10 +157,8 @@ class CourseLookupViewModel @Inject constructor(
                     showSuccessMessage = "成功添加 ${coursesToTrack.size} 门课程到后台跟踪列表"
                 )
                 
-                // 立即执行一次余量查询，放在 GlobalScope 中防止页面销毁导致查询被取消
-                kotlinx.coroutines.GlobalScope.launch {
-                    performImmediateCheck(coursesToTrack)
-                }
+                // 立即执行一次余量查询
+                performImmediateCheck(coursesToTrack)
             } catch (e: Exception) {
                 Log.e("CourseLookup", "Failed to add courses to tracking", e)
                 uiState = uiState.copy(errorMessage = "加入跟踪失败: ${e.message}")
@@ -185,8 +183,9 @@ class CourseLookupViewModel @Inject constructor(
                     .header("Accept", "application/json, text/plain, */*")
                     .build()
 
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) response.body?.string() else null
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) response.body?.string() else null
+                }
             }
 
             if (responseBody.isNullOrBlank()) {
@@ -220,8 +219,8 @@ class CourseLookupViewModel @Inject constructor(
                 if (vacancy != null) {
                     courseRepository.updateCourseStatus(course.courseId, vacancy)
                 } else {
-                    // 未在接口中找到该课程，仍然更新检测时间
-                    courseRepository.updateCourseStatus(course.courseId, null)
+                    // 未在接口中找到该课程，重置余量并更新检测时间
+                    courseRepository.updateCourseStatus(course.courseId, 0)
                 }
             }
         } catch (e: Exception) {

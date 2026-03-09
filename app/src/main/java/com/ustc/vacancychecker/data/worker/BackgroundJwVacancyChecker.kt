@@ -148,8 +148,8 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     }
                                     
                                     @JavascriptInterface
-                                    fun onVacancyResult(code: String, stdCount: Int, limitCount: Int) {
-                                        Log.d(TAG, "Vacancy result: $stdCount/$limitCount")
+                                    fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String) {
+                                        Log.d(TAG, "Vacancy result: $stdCount/$limitCount (name=$courseName, teacher=$teacher)")
                                         mainHandler.post {
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
                                                 resultMap[code] = maxOf(0, limitCount - stdCount)

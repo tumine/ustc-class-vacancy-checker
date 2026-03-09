@@ -23,6 +23,13 @@ class TrackerViewModel @Inject constructor(
             initialValue = emptyList()
         )
 
+    private val monitoringInterval: StateFlow<Int> = courseRepository.monitoringIntervalFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = 15
+        )
+
     fun removeCourse(courseId: String) {
         viewModelScope.launch {
             courseRepository.removeTrackedCourse(courseId)
@@ -36,9 +43,10 @@ class TrackerViewModel @Inject constructor(
     }
 
     fun refreshAll(context: android.content.Context) {
-        val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.ustc.vacancychecker.data.worker.ClassVacancyWorker>().build()
+        val intervalMinutes = monitoringInterval.value.toLong()
+        val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildImmediateOneTimeRequest(intervalMinutes)
         androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
-            "ManualVacancyCheck",
+            com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME,
             androidx.work.ExistingWorkPolicy.REPLACE,
             workRequest
         )

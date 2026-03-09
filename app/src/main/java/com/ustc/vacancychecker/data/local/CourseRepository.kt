@@ -26,6 +26,7 @@ class CourseRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val gson = Gson()
+    private val trackedCoursesType = object : TypeToken<MutableList<TrackedCourse>>() {}.type
     
     companion object {
         private val TRACKED_COURSES_KEY = stringPreferencesKey("tracked_courses")
@@ -34,8 +35,7 @@ class CourseRepository @Inject constructor(
 
     val trackedCoursesFlow: Flow<List<TrackedCourse>> = context.dataStore.data.map { preferences ->
         val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
-        val type = object : TypeToken<List<TrackedCourse>>() {}.type
-        gson.fromJson(jsonString, type)
+        safeParseTrackedCourses(jsonString)
     }
     val monitoringIntervalFlow: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[MONITORING_INTERVAL_KEY] ?: 15
@@ -51,11 +51,19 @@ class CourseRepository @Inject constructor(
         return trackedCoursesFlow.first()
     }
 
+    private fun safeParseTrackedCourses(jsonString: String): MutableList<TrackedCourse> {
+        return try {
+            gson.fromJson(jsonString, trackedCoursesType) ?: mutableListOf()
+        } catch (e: com.google.gson.JsonSyntaxException) {
+            android.util.Log.e("CourseRepository", "Failed to parse tracked courses, resetting to empty list", e)
+            mutableListOf()
+        }
+    }
+
     suspend fun addTrackedCourses(courses: List<TrackedCourse>) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
-            val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
-            val currentList: MutableList<TrackedCourse> = gson.fromJson(jsonString, type)
+            val currentList = safeParseTrackedCourses(jsonString)
             
             for (newCourse in courses) {
                 val index = currentList.indexOfFirst { it.courseId == newCourse.courseId }
@@ -76,8 +84,7 @@ class CourseRepository @Inject constructor(
     suspend fun removeTrackedCourse(courseId: String) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
-            val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
-            val currentList: MutableList<TrackedCourse> = gson.fromJson(jsonString, type)
+            val currentList = safeParseTrackedCourses(jsonString)
             
             currentList.removeAll { it.courseId == courseId }
             preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
@@ -87,8 +94,7 @@ class CourseRepository @Inject constructor(
     suspend fun updateCourseStatus(courseId: String, vacancy: Int? = null, isMonitoring: Boolean? = null) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
-            val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
-            val currentList: MutableList<TrackedCourse> = gson.fromJson(jsonString, type)
+            val currentList = safeParseTrackedCourses(jsonString)
             
             val index = currentList.indexOfFirst { it.courseId == courseId }
             if (index != -1) {
@@ -106,8 +112,7 @@ class CourseRepository @Inject constructor(
     suspend fun updateCheckTimeForCourses(courseIds: List<String>) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
-            val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
-            val currentList: MutableList<TrackedCourse> = gson.fromJson(jsonString, type)
+            val currentList = safeParseTrackedCourses(jsonString)
             var changed = false
             
             for (courseId in courseIds) {
@@ -130,8 +135,7 @@ class CourseRepository @Inject constructor(
     suspend fun toggleMonitoringStatus(courseId: String, isMonitoring: Boolean) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
-            val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
-            val currentList: MutableList<TrackedCourse> = gson.fromJson(jsonString, type)
+            val currentList = safeParseTrackedCourses(jsonString)
             
             val index = currentList.indexOfFirst { it.courseId == courseId }
             if (index != -1) {

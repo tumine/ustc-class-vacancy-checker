@@ -271,7 +271,7 @@ object CourseCheckScriptUtils {
      * @param classCode 课堂号
      */
     fun getSearchCourseScript(classCode: String): String {
-        val safeCode = classCode.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'")
+        val safeCode = classCode.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
         
         return """
             (function() {
@@ -391,11 +391,11 @@ object CourseCheckScriptUtils {
     /**
      * 在搜索结果中查找匹配课堂号的课程，读取已选/上限数据
      * @param classCode 课堂号
-     * 通过 AndroidBridge.onVacancyResult(stdCount, limitCount) 回调结果
-     * 通过 AndroidBridge.onCourseNotFound() 回调未找到
+     * 通过 AndroidBridge.onVacancyResult(code, stdCount, limitCount, courseName, teacher) 回调结果
+     * 通过 AndroidBridge.onCourseNotFound(code) 回调未找到
      */
     fun getReadVacancyScript(classCode: String): String {
-        val safeCode = classCode.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'")
+        val safeCode = classCode.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
         
         return """
             (function() {
