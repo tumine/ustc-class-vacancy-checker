@@ -48,7 +48,10 @@ fun TrackerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.refreshAll(context) }) {
+                    IconButton(onClick = { 
+                        android.widget.Toast.makeText(context, "正在后台刷新选课余量，请稍候...", android.widget.Toast.LENGTH_SHORT).show()
+                        viewModel.refreshAll(context) 
+                    }) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "立即刷新"

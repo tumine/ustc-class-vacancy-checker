@@ -51,7 +51,7 @@ class MainActivity : ComponentActivity() {
                     
                 WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
                     "VacancyCheckWork",
-                    ExistingPeriodicWorkPolicy.REPLACE,
+                    ExistingPeriodicWorkPolicy.UPDATE,
                     workRequest
                 )
             }
