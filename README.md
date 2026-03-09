@@ -1,4 +1,7 @@
-# USTC 选课余量检测
+<div align="center">
+  <img src="images/app_icon.png" width="128" alt="USTC 选课余量检测 Logo">
+  <h1>USTC 选课余量检测</h1>
+</div>
 
 一款 Android 应用，用于自动检测中国科学技术大学教务系统（jw.ustc.edu.cn）中指定课程的选课余量。
 
