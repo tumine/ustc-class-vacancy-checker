@@ -19,6 +19,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Add
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +44,14 @@ fun CourseCheckScreen(
         }
     }
     
+    val context = LocalContext.current
+    LaunchedEffect(uiState.showSuccessMessage) {
+        uiState.showSuccessMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            viewModel.clearSuccessMessage()
+        }
+    }
+    
     // 如果正在查询，显示 WebView
     if (uiState.showWebView) {
         WebViewCourseCheckScreen(
@@ -48,8 +59,8 @@ fun CourseCheckScreen(
             credentials = viewModel.getCredentials(),
             onNotInSelectTime = { viewModel.onNotInSelectTime() },
             onCourseNotFound = { viewModel.onCourseNotFound() },
-            onVacancyResult = { stdCount, limitCount ->
-                viewModel.onVacancyResult(stdCount, limitCount)
+            onVacancyResult = { stdCount, limitCount, courseName, teacher ->
+                viewModel.onVacancyResult(stdCount, limitCount, courseName, teacher)
             }
         )
         return
@@ -238,6 +249,28 @@ fun CourseCheckScreen(
                                 MaterialTheme.colorScheme.onErrorContainer
                             }
                         )
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        OutlinedButton(
+                            onClick = { viewModel.addToBackgroundTracking() },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = if (result.hasVacancy) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                }
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("加入后台跟踪队列")
+                        }
                     }
                 }
             }

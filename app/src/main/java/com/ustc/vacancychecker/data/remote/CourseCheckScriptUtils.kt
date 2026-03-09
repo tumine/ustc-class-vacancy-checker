@@ -431,11 +431,39 @@ object CourseCheckScriptUtils {
                     var stdCountEl = targetRow.querySelector('.std-count, [data-std-count], .enrolled');
                     var limitCountEl = targetRow.querySelector('.limit-count, [data-limit-count], .capacity');
                     
+                    // 读取课程名和教师
+                    var courseNameEl = targetRow.querySelector('.course-name, [data-course-name]');
+                    var courseName = courseNameEl ? (courseNameEl.innerText || '').trim() : "未命名课程";
+                    var teacherEl = targetRow.querySelector('.teacher, [data-teacher]');
+                    var teacher = teacherEl ? (teacherEl.innerText || '').trim() : "未知";
+
+                    if (!courseNameEl || !teacherEl) {
+                        var cellsList = targetRow.querySelectorAll('td');
+                        if (cellsList.length > 7) {
+                            if (courseName === "未命名课程" || courseName === "") courseName = (cellsList[3].innerText || '').trim();
+                            if (teacher === "未知" || teacher === "") {
+                                // 处理多个逗号分隔的教师，或者直接取 innerText
+                                var teacherNames = [];
+                                var teacherLinks = cellsList[7].querySelectorAll('a.click-teacher-info');
+                                if (teacherLinks.length > 0) {
+                                    for(var ti=0; ti<teacherLinks.length; ti++) {
+                                        teacherNames.push((teacherLinks[ti].innerText || '').trim());
+                                    }
+                                    teacher = teacherNames.join(', ');
+                                } else {
+                                    teacher = (cellsList[7].innerText || '').trim();
+                                }
+                            }
+                        }
+                    }
+                    if (!courseName) courseName = "未命名课程";
+                    if (!teacher) teacher = "未知";
+                    
                     if (stdCountEl && limitCountEl) {
                         var stdCount = parseInt(stdCountEl.innerText.trim()) || 0;
                         var limitCount = parseInt(limitCountEl.innerText.trim()) || 0;
-                        console.log("Vacancy data: " + stdCount + "/" + limitCount);
-                        try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount); } catch(e) {}
+                        console.log("Vacancy data: " + stdCount + "/" + limitCount + " name: " + courseName + " teacher: " + teacher);
+                        try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount, courseName, teacher); } catch(e) {}
                         return true;
                     }
                     
@@ -447,8 +475,8 @@ object CourseCheckScriptUtils {
                         if (match) {
                             var stdCount = parseInt(match[1]);
                             var limitCount = parseInt(match[2]);
-                            console.log("Vacancy data (parsed): " + stdCount + "/" + limitCount);
-                            try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount); } catch(e) {}
+                            console.log("Vacancy data (parsed): " + stdCount + "/" + limitCount + " name: " + courseName + " teacher: " + teacher);
+                            try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount, courseName, teacher); } catch(e) {}
                             return true;
                         }
                     }
