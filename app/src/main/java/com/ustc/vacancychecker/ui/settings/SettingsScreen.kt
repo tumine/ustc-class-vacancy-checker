@@ -16,9 +16,17 @@ import com.ustc.vacancychecker.ui.login.LoginViewModel
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onLogout: () -> Unit,
-    loginViewModel: LoginViewModel = hiltViewModel()
+    loginViewModel: LoginViewModel = hiltViewModel(),
+    settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
+    val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
+    val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
+        listOf(1, 5, 10, 15, 30, 60)
+    } else {
+        listOf(5, 10, 15, 30, 60)
+    }
+    var expanded by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -45,6 +53,62 @@ fun SettingsScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
+            // 后台监控频率设置
+            Text(
+                text = "后台监控",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "自动刷新频率", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = "设置进入监控后后台自动检测的频率。频率过高可能容易被校方接口限制。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                    )
+                    
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = "$currentInterval 分钟",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            intervalOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text("$option 分钟") },
+                                    onClick = {
+                                        settingsViewModel.updateInterval(option)
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
+                text = "账号设置",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
             // 登出按钮
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -69,13 +133,14 @@ fun SettingsScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.weight(1f))
             
             // 版本信息
             Text(
-                text = "USTC 选课余量检测 v1.0.0",
+                text = "USTC 选课余量检测 v${com.ustc.vacancychecker.BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally)
             )
         }
     }

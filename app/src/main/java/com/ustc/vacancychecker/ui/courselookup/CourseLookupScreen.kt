@@ -17,7 +17,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-
+import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CourseLookupScreen(
@@ -27,7 +27,6 @@ fun CourseLookupScreen(
 ) {
     val uiState = viewModel.uiState
 
-    // 如果正在搜索，显示 WebView
     if (uiState.showWebView) {
         WebViewCourseLookupScreen(
             keyword = uiState.keyword,
@@ -38,7 +37,29 @@ fun CourseLookupScreen(
         return
     }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(uiState.showSuccessMessage) {
+        uiState.showSuccessMessage?.let { msg ->
+            scope.launch {
+                snackbarHostState.showSnackbar(msg)
+                viewModel.clearSuccessMessage()
+            }
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        floatingActionButton = {
+            if (uiState.selectedForTracking.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick = { viewModel.addToTracking() },
+                    icon = { Icon(Icons.Filled.Search, contentDescription = null) }, // or another icon
+                    text = { Text("加入跟踪 (${uiState.selectedForTracking.size})") }
+                )
+            }
+        },
         topBar = {
             TopAppBar(
                 title = { Text("查找课堂号") },
@@ -179,11 +200,14 @@ fun CourseLookupScreen(
             // 搜索结果列表
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 80.dp) // Leave space for FAB
             ) {
                 items(uiState.results) { course ->
                     CourseResultItem(
                         course = course,
+                        isSelected = uiState.selectedForTracking.contains(course.classCode),
+                        onToggleSelection = { viewModel.toggleSelection(course.classCode) },
                         onClick = {
                             onCourseSelected(course.classCode)
                         }
@@ -197,52 +221,60 @@ fun CourseLookupScreen(
 @Composable
 private fun CourseResultItem(
     course: CourseInfo,
+    isSelected: Boolean,
+    onToggleSelection: () -> Unit,
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            // 课程名
-            Text(
-                text = course.courseName.ifBlank { "（未知课程名）" }.replace("\n", " ").replace(Regex("\\s+"), " ").trim(),
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // 课堂号 + 教师
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick)
+                    .padding(16.dp)
             ) {
-                if (course.classCode.isNotBlank()) {
-                    Text(
-                        text = "课堂号: ${course.classCode}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                } else {
-                    Spacer(modifier = Modifier)
-                }
-                if (course.teacher.isNotBlank()) {
-                    Text(
-                        text = "教师: ${course.teacher}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // 课程名
+                Text(
+                    text = course.courseName.ifBlank { "（未知课程名）" }.replace("\n", " ").replace(Regex("\\s+"), " ").trim(),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // 课堂号 + 教师
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (course.classCode.isNotBlank()) {
+                        Text(
+                            text = "课堂号: ${course.classCode}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Spacer(modifier = Modifier)
+                    }
+                    if (course.teacher.isNotBlank()) {
+                        Text(
+                            text = "教师: ${course.teacher}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onToggleSelection() },
+                modifier = Modifier.padding(end = 16.dp)
+            )
         }
     }
 }

@@ -10,12 +10,14 @@ import com.ustc.vacancychecker.ui.coursecheck.CourseCheckScreen
 import com.ustc.vacancychecker.ui.courselookup.CourseLookupScreen
 import com.ustc.vacancychecker.ui.login.LoginScreen
 import com.ustc.vacancychecker.ui.settings.SettingsScreen
+import com.ustc.vacancychecker.ui.tracker.TrackerScreen
 
 object Routes {
     const val LOGIN = "login"
     const val COURSE_CHECK = "course_check"
     const val SETTINGS = "settings"
     const val COURSE_LOOKUP = "course_lookup"
+    const val TRACKER = "tracker"
 }
 
 /** savedStateHandle key for passing selected class code back from CourseLookup */
@@ -54,6 +56,9 @@ fun NavGraph(
                 onNavigateToCourseLookup = {
                     navController.navigate(Routes.COURSE_LOOKUP)
                 },
+                onNavigateToTracker = {
+                    navController.navigate(Routes.TRACKER)
+                },
                 selectedClassCode = selectedClassCode,
                 onSelectedClassCodeConsumed = {
                     backStackEntry.savedStateHandle.remove<String>(KEY_SELECTED_CLASS_CODE)
@@ -84,6 +89,14 @@ fun NavGraph(
                     navController.previousBackStackEntry
                         ?.savedStateHandle
                         ?.set(KEY_SELECTED_CLASS_CODE, classCode)
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        composable(Routes.TRACKER) {
+            TrackerScreen(
+                onNavigateBack = {
                     navController.popBackStack()
                 }
             )

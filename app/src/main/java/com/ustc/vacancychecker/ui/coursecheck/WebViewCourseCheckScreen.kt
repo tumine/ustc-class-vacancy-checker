@@ -24,7 +24,7 @@ fun WebViewCourseCheckScreen(
     credentials: Pair<String, String>? = null,
     onNotInSelectTime: () -> Unit,
     onCourseNotFound: () -> Unit,
-    onVacancyResult: (stdCount: Int, limitCount: Int) -> Unit
+    onVacancyResult: (stdCount: Int, limitCount: Int, courseName: String, teacher: String) -> Unit
 ) {
     val courseSelectUrl = "https://jw.ustc.edu.cn/for-std/course-select"
     
@@ -110,7 +110,7 @@ fun WebViewCourseCheckScreen(
                         }
                         
                         @JavascriptInterface
-                        fun onSearchComplete() {
+                        fun onSearchComplete(code: String) {
                             Log.d("CourseCheck", "Search complete, reading vacancy...")
                             hasSearched = true
                             // 搜索完成后，读取余量数据
@@ -121,13 +121,13 @@ fun WebViewCourseCheckScreen(
                         }
                         
                         @JavascriptInterface
-                        fun onVacancyResult(stdCount: Int, limitCount: Int) {
-                            Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount")
-                            post { onVacancyResult(stdCount, limitCount) }
+                        fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String) {
+                            Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount, name: $courseName, teacher: $teacher")
+                            post { onVacancyResult(stdCount, limitCount, courseName, teacher) }
                         }
                         
                         @JavascriptInterface
-                        fun onCourseNotFound() {
+                        fun onCourseNotFound(code: String) {
                             Log.d("CourseCheck", "Course not found")
                             post { onCourseNotFound() }
                         }
