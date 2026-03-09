@@ -9,8 +9,12 @@ import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.TrackedCourse
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import javax.inject.Inject
 
 @HiltViewModel
@@ -152,10 +156,67 @@ class CourseLookupViewModel @Inject constructor(
                     selectedForTracking = emptySet(),
                     showSuccessMessage = "成功添加 ${coursesToTrack.size} 门课程到后台跟踪列表"
                 )
+                
+                // 立即执行一次余量查询（直接在协程中调用，不通过 WorkManager）
+                performImmediateCheck(coursesToTrack)
             } catch (e: Exception) {
                 Log.e("CourseLookup", "Failed to add courses to tracking", e)
                 uiState = uiState.copy(errorMessage = "加入跟踪失败: ${e.message}")
             }
+        }
+    }
+
+    private suspend fun performImmediateCheck(courses: List<TrackedCourse>) {
+        try {
+            val semesterId = "421"
+            val url = "https://catalog.ustc.edu.cn/api/teach/lesson/list-for-teach/$semesterId"
+
+            val responseBody = withContext(Dispatchers.IO) {
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .header("Accept", "application/json, text/plain, */*")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) response.body?.string() else null
+            }
+
+            if (responseBody.isNullOrBlank()) {
+                // API 请求失败，仍然更新检测时间
+                courseRepository.updateCheckTimeForCourses(courses.map { it.courseId })
+                return
+            }
+
+            val jsonArray = JSONArray(responseBody)
+            val vacancyMap = mutableMapOf<String, Int>()
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+                val code = item.optString("code", "")
+                val stdCount = item.optInt("stdCount", 0)
+                val limitCount = item.optInt("limitCount", 0)
+                if (code.isNotBlank()) {
+                    vacancyMap[code] = maxOf(0, limitCount - stdCount)
+                }
+            }
+
+            for (course in courses) {
+                val vacancy = vacancyMap[course.courseId]
+                if (vacancy != null) {
+                    courseRepository.updateCourseStatus(course.courseId, vacancy)
+                } else {
+                    // 未在接口中找到该课程，仍然更新检测时间
+                    courseRepository.updateCourseStatus(course.courseId, null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CourseLookup", "Immediate vacancy check failed", e)
+            courseRepository.updateCheckTimeForCourses(courses.map { it.courseId })
         }
     }
 }

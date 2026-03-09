@@ -30,7 +30,7 @@ fun TrackerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("后台跟踪列队") },
+                title = { Text("后台跟踪队列") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(

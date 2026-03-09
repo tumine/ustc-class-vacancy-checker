@@ -50,12 +50,14 @@ class ClassVacancyWorker @AssistedInject constructor(
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Log.e("ClassVacancyWorker", "API Request failed with code: ${response.code}")
+                repository.updateCheckTimeForCourses(courses.map { it.courseId })
                 return Result.retry()
             }
 
             val responseBody = response.body?.string()
             if (responseBody.isNullOrBlank()) {
                 Log.e("ClassVacancyWorker", "Empty response from API")
+                repository.updateCheckTimeForCourses(courses.map { it.courseId })
                 return Result.retry()
             }
 
@@ -87,11 +89,13 @@ class ClassVacancyWorker @AssistedInject constructor(
                     }
                 } else {
                     Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in catalog data")
+                    repository.updateCourseStatus(course.courseId, null)
                 }
             }
 
         } catch (e: Exception) {
             Log.e("ClassVacancyWorker", "Error while fetching vacancy data", e)
+            repository.updateCheckTimeForCourses(courses.map { it.courseId })
             return Result.retry()
         }
 
