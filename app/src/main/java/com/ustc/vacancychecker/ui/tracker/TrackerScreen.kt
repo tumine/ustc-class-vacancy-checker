@@ -19,6 +19,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrackerScreen(
@@ -26,16 +32,26 @@ fun TrackerScreen(
     viewModel: TrackerViewModel = hiltViewModel()
 ) {
     val courses by viewModel.trackedCourses.collectAsState()
+    var courseToDelete by remember { mutableStateOf<TrackedCourse?>(null) }
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("后台跟踪列队") },
+                title = { Text("后台跟踪队列") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "返回"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { viewModel.refreshAll(context) }) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "立即刷新"
                         )
                     }
                 },
@@ -75,12 +91,35 @@ fun TrackerScreen(
                             viewModel.toggleMonitoring(course.courseId, isMonitoring)
                         },
                         onDelete = {
-                            viewModel.removeCourse(course.courseId)
+                            courseToDelete = course
                         }
                     )
                 }
             }
         }
+    }
+
+    if (courseToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { courseToDelete = null },
+            title = { Text("确认删除跟踪") },
+            text = { Text("确定要取消对 [${courseToDelete?.courseName}] (${courseToDelete?.courseId}) 的后台自动跟踪吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        courseToDelete?.courseId?.let { viewModel.removeCourse(it) }
+                        courseToDelete = null
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { courseToDelete = null }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 }
 

@@ -21,6 +21,10 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.ustc.vacancychecker.data.worker.ClassVacancyWorker
 import java.util.concurrent.TimeUnit
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import com.ustc.vacancychecker.data.local.CourseRepository
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -28,25 +32,30 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var credentialsManager: CredentialsManager
     
-
+    @Inject
+    lateinit var courseRepository: CourseRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // 启动后台轮询检测服务 (每 15 分钟一次，仅在有网络时执行)
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-            
-        val workRequest = PeriodicWorkRequestBuilder<ClassVacancyWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(constraints)
-            .build()
-            
-        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            "VacancyCheckWork",
-            ExistingPeriodicWorkPolicy.KEEP,
-            workRequest
-        )
+        // 观察后台刷新频率并在变化时更新 WorkManager
+        lifecycleScope.launch {
+            courseRepository.monitoringIntervalFlow.collectLatest { interval ->
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+                    
+                val workRequest = PeriodicWorkRequestBuilder<ClassVacancyWorker>(interval.toLong(), TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build()
+                    
+                WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                    "VacancyCheckWork",
+                    ExistingPeriodicWorkPolicy.REPLACE,
+                    workRequest
+                )
+            }
+        }
         
         setContent {
             UstcVacancyCheckerTheme {

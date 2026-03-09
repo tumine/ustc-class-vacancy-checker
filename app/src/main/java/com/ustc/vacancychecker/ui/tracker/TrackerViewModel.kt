@@ -34,4 +34,13 @@ class TrackerViewModel @Inject constructor(
             courseRepository.toggleMonitoringStatus(courseId, isMonitoring)
         }
     }
+
+    fun refreshAll(context: android.content.Context) {
+        val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.ustc.vacancychecker.data.worker.ClassVacancyWorker>().build()
+        androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
+            "ManualVacancyCheck",
+            androidx.work.ExistingWorkPolicy.REPLACE,
+            workRequest
+        )
+    }
 }

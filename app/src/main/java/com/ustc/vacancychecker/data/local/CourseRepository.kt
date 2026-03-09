@@ -13,8 +13,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import javax.inject.Inject
 import javax.inject.Singleton
+
+import androidx.datastore.preferences.core.intPreferencesKey
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "course_tracking")
 
@@ -26,12 +29,22 @@ class CourseRepository @Inject constructor(
     
     companion object {
         private val TRACKED_COURSES_KEY = stringPreferencesKey("tracked_courses")
+        private val MONITORING_INTERVAL_KEY = intPreferencesKey("monitoring_interval")
     }
 
     val trackedCoursesFlow: Flow<List<TrackedCourse>> = context.dataStore.data.map { preferences ->
         val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
         val type = object : TypeToken<List<TrackedCourse>>() {}.type
         gson.fromJson(jsonString, type)
+    }
+    val monitoringIntervalFlow: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[MONITORING_INTERVAL_KEY] ?: 15
+    }.distinctUntilChanged()
+
+    suspend fun updateMonitoringInterval(intervalMinutes: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[MONITORING_INTERVAL_KEY] = intervalMinutes
+        }
     }
 
     suspend fun getTrackedCourses(): List<TrackedCourse> {
@@ -71,7 +84,7 @@ class CourseRepository @Inject constructor(
         }
     }
 
-    suspend fun updateCourseStatus(courseId: String, vacancy: Int, isMonitoring: Boolean? = null) {
+    suspend fun updateCourseStatus(courseId: String, vacancy: Int? = null, isMonitoring: Boolean? = null) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
             val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
@@ -81,10 +94,34 @@ class CourseRepository @Inject constructor(
             if (index != -1) {
                 val item = currentList[index]
                 currentList[index] = item.copy(
-                    vacancy = vacancy,
+                    vacancy = vacancy ?: item.vacancy,
                     lastCheckTime = System.currentTimeMillis(),
                     isMonitoring = isMonitoring ?: item.isMonitoring
                 )
+                preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
+            }
+        }
+    }
+
+    suspend fun updateCheckTimeForCourses(courseIds: List<String>) {
+        context.dataStore.edit { preferences ->
+            val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
+            val type = object : TypeToken<MutableList<TrackedCourse>>() {}.type
+            val currentList: MutableList<TrackedCourse> = gson.fromJson(jsonString, type)
+            var changed = false
+            
+            for (courseId in courseIds) {
+                val index = currentList.indexOfFirst { it.courseId == courseId }
+                if (index != -1) {
+                    val item = currentList[index]
+                    currentList[index] = item.copy(
+                        lastCheckTime = System.currentTimeMillis()
+                    )
+                    changed = true
+                }
+            }
+            
+            if (changed) {
                 preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
             }
         }
