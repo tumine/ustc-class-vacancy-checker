@@ -163,4 +163,13 @@ class CourseRepository @Inject constructor(
             }
         }
     }
+
+    /**
+     * 清除所有追踪课程数据
+     */
+    suspend fun clearAllCourses() {
+        context.dataStore.edit { preferences ->
+            preferences[TRACKED_COURSES_KEY] = "[]"
+        }
+    }
 }

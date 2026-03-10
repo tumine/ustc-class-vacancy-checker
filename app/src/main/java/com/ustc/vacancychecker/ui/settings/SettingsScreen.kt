@@ -242,19 +242,40 @@ fun SettingsScreen(
     }
     
     if (showLogoutDialog) {
+        var clearData by remember { mutableStateOf(false) } // 默认不勾选，防止误操作
+
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title = { Text("退出登录") },
-            text = { Text("确定要退出登录吗？退出后需要重新登录。") },
+            title = { Text("确认退出") },
+            text = { 
+                Column {
+                    Text("退出登录将清除所有本地保存的凭证。")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { clearData = !clearData }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = clearData,
+                            onCheckedChange = { clearData = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("同时清除本地课程数据")
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        loginViewModel.logout()
+                        loginViewModel.logout(clearData)
                         showLogoutDialog = false
                         onLogout()
                     }
                 ) {
-                    Text("确定", color = MaterialTheme.colorScheme.error)
+                    Text("退出", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
