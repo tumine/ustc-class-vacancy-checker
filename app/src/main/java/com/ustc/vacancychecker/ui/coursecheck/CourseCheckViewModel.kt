@@ -56,7 +56,8 @@ class CourseCheckViewModel @Inject constructor(
             isChecking = true,
             showWebView = true,
             result = null,
-            errorMessage = null
+            errorMessage = null,
+            selectResult = null // 关闭上一次查询的自动选课结果弹窗
         )
     }
     
