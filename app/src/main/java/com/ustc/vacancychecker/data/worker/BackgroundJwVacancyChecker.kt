@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
+import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -15,14 +16,6 @@ import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
-
-/**
- * 选课结果数据类
- */
-data class SelectResult(
-    val success: Boolean,
-    val message: String
-)
 
 @Singleton
 class BackgroundJwVacancyChecker @Inject constructor(

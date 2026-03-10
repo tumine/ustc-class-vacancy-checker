@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
+import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.model.TrackedCourse
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
@@ -101,7 +102,7 @@ class CourseCheckViewModel @Inject constructor(
             Log.d("CourseCheck", "Course already selected, showing notification")
             uiState = uiState.copy(
                 showWebView = false,
-                selectResult = SelectResult(false, "该课程已选，无需重复选课")
+                selectResult = SelectResult(success = true, message = "该课程已选，无需重复选课", isAlreadySelected = true)
             )
         }
         // 如果有空位且启用自动选课且有选课按钮且未选，不关闭WebView，继续选课流程
@@ -136,7 +137,7 @@ class CourseCheckViewModel @Inject constructor(
             uiState = uiState.copy(
                 showWebView = false,
                 isSelecting = false,
-                selectResult = SelectResult(false, message)
+                selectResult = SelectResult(success = true, message = message, isAlreadySelected = true)
             )
         }
     }
@@ -148,14 +149,6 @@ class CourseCheckViewModel @Inject constructor(
             showWebView = false,
             selectResult = SelectResult(success, message)
         )
-    }
-    
-    fun toggleAutoSelect() {
-        viewModelScope.launch {
-            val newValue = !uiState.autoSelectEnabled
-            courseRepository.updateAutoSelectEnabled(newValue)
-            uiState = uiState.copy(autoSelectEnabled = newValue)
-        }
     }
 
     fun addToBackgroundTracking() {
@@ -210,9 +203,4 @@ data class VacancyResult(
     val hasVacancy: Boolean,
     val hasSelectButton: Boolean = false,
     val isAlreadySelected: Boolean = false
-)
-
-data class SelectResult(
-    val success: Boolean,
-    val message: String
 )
