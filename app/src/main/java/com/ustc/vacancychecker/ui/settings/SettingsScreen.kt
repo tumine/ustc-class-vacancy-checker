@@ -31,9 +31,9 @@ fun SettingsScreen(
     val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
     val autoSelectEnabled by settingsViewModel.autoSelectEnabled.collectAsState()
     val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
-        listOf(1, 5, 10, 15, 30, 60)
+        listOf(1, 5, 10, 15, 30, 60, 120, 240)
     } else {
-        listOf(5, 10, 15, 30, 60)
+        listOf(5, 10, 15, 30, 60, 120, 240)
     }
     var expanded by remember { mutableStateOf(false) }
     

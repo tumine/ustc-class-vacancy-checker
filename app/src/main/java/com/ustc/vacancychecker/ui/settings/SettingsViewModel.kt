@@ -25,7 +25,7 @@ class SettingsViewModel @Inject constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 15
+            initialValue = 60
         )
     
     val autoSelectEnabled: StateFlow<Boolean> = repository.autoSelectEnabledFlow

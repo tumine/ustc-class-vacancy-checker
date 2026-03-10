@@ -146,40 +146,6 @@ fun CourseCheckScreen(
             
             Spacer(modifier = Modifier.height(24.dp))
             
-            // 自动选课开关
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "自动选课",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            text = "检测到空位后自动点击选课按钮",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = uiState.autoSelectEnabled,
-                        onCheckedChange = { viewModel.toggleAutoSelect() }
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
             // 开始检测按钮
             Button(
                 onClick = { viewModel.startCheck() },

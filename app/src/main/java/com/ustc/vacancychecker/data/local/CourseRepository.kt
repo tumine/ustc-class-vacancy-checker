@@ -40,7 +40,7 @@ class CourseRepository @Inject constructor(
         safeParseTrackedCourses(jsonString)
     }
     val monitoringIntervalFlow: Flow<Int> = context.dataStore.data.map { preferences ->
-        preferences[MONITORING_INTERVAL_KEY] ?: 15
+        preferences[MONITORING_INTERVAL_KEY] ?: 60
     }.distinctUntilChanged()
     
     val autoSelectEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
