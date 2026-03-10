@@ -499,14 +499,14 @@ object CourseCheckScriptUtils {
                             if (teacher === "未知" || teacher === "") {
                                 // 处理多个逗号分隔的教师，或者直接取 innerText
                                 var teacherNames = [];
-                                var teacherLinks = cellsList[7].querySelectorAll('a.click-teacher-info');
+                                var teacherLinks = cellsList[6].querySelectorAll('a.click-teacher-info');
                                 if (teacherLinks.length > 0) {
                                     for(var ti=0; ti<teacherLinks.length; ti++) {
                                         teacherNames.push((teacherLinks[ti].innerText || '').trim());
                                     }
                                     teacher = teacherNames.join(', ');
                                 } else {
-                                    teacher = (cellsList[7].innerText || '').trim();
+                                    teacher = (cellsList[6].innerText || '').trim();
                                 }
                             }
                         }
