@@ -406,24 +406,36 @@ object CourseCheckScriptUtils {
                     // TODO: 根据实际页面 DOM 结构更新选择器
                     // 查找包含课堂号的课程行（大小写不敏感）
                     var rows = document.querySelectorAll('tr, .course-row, .course-item');
-                    var targetRow = null;
+                    var matchedRows = [];
                     var searchCode = "$safeCode".toLowerCase();
                     
+                    // 收集所有匹配的行
                     for (var i = 0; i < rows.length; i++) {
                         var rowText = (rows[i].innerText || rows[i].textContent || '').toLowerCase();
                         if (rowText.indexOf(searchCode) !== -1) {
-                            targetRow = rows[i];
-                            break;
+                            matchedRows.push(rows[i]);
                         }
                     }
                     
-                    if (!targetRow) {
+                    // 如果匹配到多个课程，报错提示
+                    if (matchedRows.length > 1) {
+                        console.log("Multiple courses matched code '$safeCode', count: " + matchedRows.length);
+                        try { AndroidBridge.onMultipleCoursesFound("$safeCode", matchedRows.length); } catch(e) {
+                            // 如果没有这个回调，使用 onCourseNotFound
+                            try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e2) {}
+                        }
+                        return true;
+                    }
+                    
+                    if (matchedRows.length === 0) {
                         if (attempts >= maxAttempts - 1) {
                             console.log("Course with code '$safeCode' not found");
                             try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                         }
                         return false;
                     }
+                    
+                    var targetRow = matchedRows[0];
                     
                     console.log("Found course row for code: $safeCode");
                     
@@ -573,22 +585,31 @@ object CourseCheckScriptUtils {
                 
                 // 查找包含课堂号的课程行（大小写不敏感）
                 var rows = document.querySelectorAll('tr, .course-row, .course-item');
-                var targetRow = null;
+                var matchedRows = [];
                 var searchCode = "$safeCode".toLowerCase();
                 
+                // 收集所有匹配的行
                 for (var i = 0; i < rows.length; i++) {
                     var rowText = (rows[i].innerText || rows[i].textContent || '').toLowerCase();
                     if (rowText.indexOf(searchCode) !== -1) {
-                        targetRow = rows[i];
-                        break;
+                        matchedRows.push(rows[i]);
                     }
                 }
                 
-                if (!targetRow) {
+                // 如果匹配到多个课程，报错提示
+                if (matchedRows.length > 1) {
+                    logDom("Multiple courses matched code '$safeCode', count: " + matchedRows.length);
+                    try { AndroidBridge.onSelectButtonClickResult(false, "匹配到多个课堂，请检查课堂号"); } catch(e) {}
+                    return;
+                }
+                
+                if (matchedRows.length === 0) {
                     logDom("Course row not found for code: $safeCode");
                     try { AndroidBridge.onSelectButtonClickResult(false, "未找到课程"); } catch(e) {}
                     return;
                 }
+                
+                var targetRow = matchedRows[0];
                 
                 // 查找"选课"按钮
                 var buttons = targetRow.querySelectorAll('button, a, span[onclick], input[type="button"], div[onclick]');

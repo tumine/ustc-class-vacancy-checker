@@ -146,6 +146,12 @@ fun WebViewCourseCheckScreen(
                         }
                         
                         @JavascriptInterface
+                        fun onMultipleCoursesFound(code: String, count: Int) {
+                            Log.d("CourseCheck", "Multiple courses found for code '$code', count: $count")
+                            post { onCourseNotFound() }
+                        }
+                        
+                        @JavascriptInterface
                         fun onSelectButtonClickResult(success: Boolean, message: String) {
                             Log.d("CourseCheck", "Select button click result: success=$success, message=$message")
                             post { 

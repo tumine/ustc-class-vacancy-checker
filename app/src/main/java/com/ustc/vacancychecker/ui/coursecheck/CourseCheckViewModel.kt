@@ -49,7 +49,14 @@ class CourseCheckViewModel @Inject constructor(
         if (code.isBlank()) {
             uiState = uiState.copy(errorMessage = "请输入课堂号")
             return
+        } 
+                
+        // 验证课堂号格式：倒数第3位应该是小数点
+        if (code.length < 3 || code[code.length - 3] != '.') {
+            uiState = uiState.copy(errorMessage = "请检查课堂号（格式如MATH1001.01）")
+            return
         }
+       
         uiState = uiState.copy(
             classCode = code, // 确保如果是从列表点击，输入框也更新
             courseName = null,
