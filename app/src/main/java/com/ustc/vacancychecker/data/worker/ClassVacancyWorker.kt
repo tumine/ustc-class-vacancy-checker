@@ -7,6 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
+import com.ustc.vacancychecker.data.model.SelectResult
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -81,19 +82,32 @@ class ClassVacancyWorker @AssistedInject constructor(
                 Log.e("ClassVacancyWorker", "No credentials available for JW check")
                 return Result.failure()
             }
+            
+            val autoSelectEnabled = repository.isAutoSelectEnabled()
+            Log.d("ClassVacancyWorker", "Auto select enabled: $autoSelectEnabled")
 
             val classCodes = courses.map { it.courseId }
-            val result = bgJwChecker.performCheck(classCodes, username, password)
+            val result = bgJwChecker.performCheck(classCodes, username, password, autoSelectEnabled)
 
             if (result.isSuccess) {
                 val vacancyMap = result.getOrThrow()
                 for (course in courses) {
-                    val vacancy = vacancyMap[course.courseId]
-                    if (vacancy != null) {
-                        Log.d("ClassVacancyWorker", "Check ${course.courseId}: $vacancy vacancy available")
+                    val data = vacancyMap[course.courseId]
+                    if (data != null) {
+                        val vacancy = data.first
+                        val selectResult = data.second
+                        Log.d("ClassVacancyWorker", "Check ${course.courseId}: $vacancy vacancy available, selectResult=$selectResult")
                         repository.updateCourseStatus(course.courseId, vacancy)
                         
-                        if (vacancy > 0) {
+                        // 如果有选课结果
+                        if (selectResult != null) {
+                            if (selectResult.success) {
+                                sendSelectSuccessNotification(course.courseId, course.courseName, selectResult.message)
+                            } else if (!selectResult.isAlreadySelected) {
+                                sendSelectFailedNotification(course.courseId, course.courseName, selectResult.message)
+                            }
+                        } else if (vacancy > 0) {
+                            // 只有空位但没有自动选课（可能已选或未启用自动选课）
                             sendVacancyNotification(course.courseId, course.courseName, vacancy)
                         }
                     } else {
@@ -153,5 +167,54 @@ class ClassVacancyWorker @AssistedInject constructor(
 
         // Use courseId hash code as unique notification ID
         notificationManager.notify(courseId.hashCode(), notification)
+    }
+    
+    private fun sendSelectSuccessNotification(courseId: String, courseName: String, message: String) {
+        Log.i("ClassVacancyWorker", "🎉 NOTIFICATION: Course $courseId ($courseName) selected successfully!")
+
+        val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+        val intent = android.content.Intent(appContext, com.ustc.vacancychecker.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent: android.app.PendingIntent = android.app.PendingIntent.getActivity(
+            appContext, 0, intent, android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = androidx.core.app.NotificationCompat.Builder(appContext, com.ustc.vacancychecker.VacancyCheckerApp.CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("🎉 选课成功！")
+            .setContentText("[$courseName] ($courseId) 已成功选课！")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify("${courseId}_select_success".hashCode(), notification)
+    }
+    
+    private fun sendSelectFailedNotification(courseId: String, courseName: String, message: String) {
+        Log.i("ClassVacancyWorker", "❌ NOTIFICATION: Course $courseId ($courseName) selection failed: $message")
+
+        val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
+        val intent = android.content.Intent(appContext, com.ustc.vacancychecker.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent: android.app.PendingIntent = android.app.PendingIntent.getActivity(
+            appContext, 0, intent, android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = androidx.core.app.NotificationCompat.Builder(appContext, com.ustc.vacancychecker.VacancyCheckerApp.CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("❌ 选课失败")
+            .setContentText("[$courseName] ($courseId) 选课失败：$message")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText("[$courseName] ($courseId) 选课失败：$message"))
+            .build()
+
+        notificationManager.notify("${courseId}_select_failed".hashCode(), notification)
     }
 }

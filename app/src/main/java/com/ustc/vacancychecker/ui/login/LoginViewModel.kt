@@ -1,17 +1,23 @@
 package com.ustc.vacancychecker.ui.login
 
 import android.util.Log
+import android.webkit.CookieManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
-    private val credentialsManager: CredentialsManager
+    private val credentialsManager: CredentialsManager,
+    private val courseRepository: CourseRepository
 ) : ViewModel() {
     
     var uiState by mutableStateOf(LoginUiState())
@@ -65,8 +71,23 @@ class LoginViewModel @Inject constructor(
         uiState = uiState.copy(errorMessage = message)
     }
 
-    fun logout() {
+    fun logout(clearData: Boolean = false) {
+        // 清除凭证
         credentialsManager.clearCredentials()
+        
+        // 同时清除 WebView 的 cookies
+        CookieManager.getInstance().apply {
+            removeAllCookies(null)
+            flush()
+        }
+        
+        // 如果用户选择清除数据，则清除课程数据
+        if (clearData) {
+            viewModelScope.launch(Dispatchers.IO) {
+                courseRepository.clearAllCourses()
+            }
+        }
+        
         uiState = LoginUiState()
     }
 }

@@ -18,6 +18,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "course_tracking")
 
@@ -31,6 +32,7 @@ class CourseRepository @Inject constructor(
     companion object {
         private val TRACKED_COURSES_KEY = stringPreferencesKey("tracked_courses")
         private val MONITORING_INTERVAL_KEY = intPreferencesKey("monitoring_interval")
+        private val AUTO_SELECT_ENABLED_KEY = booleanPreferencesKey("auto_select_enabled")
     }
 
     val trackedCoursesFlow: Flow<List<TrackedCourse>> = context.dataStore.data.map { preferences ->
@@ -38,13 +40,27 @@ class CourseRepository @Inject constructor(
         safeParseTrackedCourses(jsonString)
     }
     val monitoringIntervalFlow: Flow<Int> = context.dataStore.data.map { preferences ->
-        preferences[MONITORING_INTERVAL_KEY] ?: 15
+        preferences[MONITORING_INTERVAL_KEY] ?: 60
+    }.distinctUntilChanged()
+    
+    val autoSelectEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[AUTO_SELECT_ENABLED_KEY] ?: false
     }.distinctUntilChanged()
 
     suspend fun updateMonitoringInterval(intervalMinutes: Int) {
         context.dataStore.edit { preferences ->
             preferences[MONITORING_INTERVAL_KEY] = intervalMinutes
         }
+    }
+    
+    suspend fun updateAutoSelectEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[AUTO_SELECT_ENABLED_KEY] = enabled
+        }
+    }
+    
+    suspend fun isAutoSelectEnabled(): Boolean {
+        return autoSelectEnabledFlow.first()
     }
 
     suspend fun getTrackedCourses(): List<TrackedCourse> {
@@ -145,6 +161,15 @@ class CourseRepository @Inject constructor(
                 )
                 preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
             }
+        }
+    }
+
+    /**
+     * 清除所有追踪课程数据
+     */
+    suspend fun clearAllCourses() {
+        context.dataStore.edit { preferences ->
+            preferences[TRACKED_COURSES_KEY] = "[]"
         }
     }
 }

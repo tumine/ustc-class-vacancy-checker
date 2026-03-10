@@ -22,9 +22,12 @@ import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 fun WebViewCourseCheckScreen(
     classCode: String,
     credentials: Pair<String, String>? = null,
+    autoSelectEnabled: Boolean = false,
     onNotInSelectTime: () -> Unit,
     onCourseNotFound: () -> Unit,
-    onVacancyResult: (stdCount: Int, limitCount: Int, courseName: String, teacher: String) -> Unit
+    onVacancyResult: (stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) -> Unit,
+    onSelectButtonClickResult: (success: Boolean, message: String) -> Unit = { _, _ -> },
+    onSelectResult: (success: Boolean, message: String) -> Unit = { _, _ -> }
 ) {
     val courseSelectUrl = "https://jw.ustc.edu.cn/for-std/course-select"
     
@@ -121,15 +124,46 @@ fun WebViewCourseCheckScreen(
                         }
                         
                         @JavascriptInterface
-                        fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String) {
-                            Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount, name: $courseName, teacher: $teacher")
-                            post { onVacancyResult(stdCount, limitCount, courseName, teacher) }
+                        fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) {
+                            Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount, name: $courseName, teacher: $teacher, hasSelectButton: $hasSelectButton, isAlreadySelected: $isAlreadySelected")
+                            post { 
+                                onVacancyResult(stdCount, limitCount, courseName, teacher, hasSelectButton, isAlreadySelected)
+                                // 如果启用自动选课且有空位且有选课按钮，触发选课
+                                if (autoSelectEnabled && stdCount < limitCount && hasSelectButton && !isAlreadySelected) {
+                                    Log.d("CourseCheck", "Auto-select enabled, triggering select course...")
+                                    postDelayed({
+                                        val clickJs = CourseCheckScriptUtils.getClickSelectButtonScript(classCode)
+                                        evaluateJavascript(clickJs, null)
+                                    }, 1000)
+                                }
+                            }
                         }
                         
                         @JavascriptInterface
                         fun onCourseNotFound(code: String) {
                             Log.d("CourseCheck", "Course not found")
                             post { onCourseNotFound() }
+                        }
+                        
+                        @JavascriptInterface
+                        fun onSelectButtonClickResult(success: Boolean, message: String) {
+                            Log.d("CourseCheck", "Select button click result: success=$success, message=$message")
+                            post { 
+                                onSelectButtonClickResult(success, message)
+                                // 如果成功点击了选课按钮，等待结果
+                                if (success) {
+                                    postDelayed({
+                                        val resultJs = CourseCheckScriptUtils.getCheckSelectResultScript()
+                                        evaluateJavascript(resultJs, null)
+                                    }, 1500)
+                                }
+                            }
+                        }
+                        
+                        @JavascriptInterface
+                        fun onSelectResult(success: Boolean, message: String) {
+                            Log.d("CourseCheck", "Select result: success=$success, message=$message")
+                            post { onSelectResult(success, message) }
                         }
                     }, "AndroidBridge")
                     
