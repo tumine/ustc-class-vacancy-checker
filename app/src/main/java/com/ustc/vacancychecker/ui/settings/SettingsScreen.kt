@@ -6,6 +6,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -21,6 +22,7 @@ fun SettingsScreen(
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
+    val autoSelectEnabled by settingsViewModel.autoSelectEnabled.collectAsState()
     val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
         listOf(1, 5, 10, 15, 30, 60)
     } else {
@@ -103,6 +105,39 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(24.dp))
             
             Text(
+                text = "选课设置",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "自动选课", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "检测到空位后自动点击选课按钮（谨慎使用）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    Switch(
+                        checked = autoSelectEnabled,
+                        onCheckedChange = { settingsViewModel.updateAutoSelectEnabled(it) }
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
                 text = "账号设置",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
@@ -140,7 +175,7 @@ fun SettingsScreen(
                 text = "USTC 选课余量检测 v${com.ustc.vacancychecker.BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally)
+                modifier = Modifier.align(Alignment.CenterHorizontally)
             )
         }
     }

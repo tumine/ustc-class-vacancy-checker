@@ -22,6 +22,14 @@ class CourseCheckViewModel @Inject constructor(
     var uiState by mutableStateOf(CourseCheckUiState())
         private set
     
+    init {
+        viewModelScope.launch {
+            courseRepository.autoSelectEnabledFlow.collect { enabled ->
+                uiState = uiState.copy(autoSelectEnabled = enabled)
+            }
+        }
+    }
+    
     fun updateClassCode(code: String) {
         uiState = uiState.copy(classCode = code)
     }
@@ -70,28 +78,62 @@ class CourseCheckViewModel @Inject constructor(
         )
     }
     
-    fun onVacancyResult(stdCount: Int, limitCount: Int, courseName: String, teacher: String) {
-        Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount, course: $courseName, teacher: $teacher")
+    fun onVacancyResult(stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) {
+        Log.d("CourseCheck", "Vacancy result: $stdCount/$limitCount, course: $courseName, teacher: $teacher, hasSelectButton: $hasSelectButton, isAlreadySelected: $isAlreadySelected")
         val hasVacancy = stdCount < limitCount
+        
         uiState = uiState.copy(
             isChecking = false,
-            showWebView = false,
             courseName = courseName.ifBlank { "未命名课程" },
             teacher = teacher.ifBlank { "未知" },
             result = VacancyResult(
                 stdCount = stdCount,
                 limitCount = limitCount,
-                hasVacancy = hasVacancy
+                hasVacancy = hasVacancy,
+                hasSelectButton = hasSelectButton,
+                isAlreadySelected = isAlreadySelected
             )
         )
+        
+        // 如果有空位且启用自动选课且有选课按钮，不关闭WebView，继续选课流程
+        if (hasVacancy && uiState.autoSelectEnabled && hasSelectButton && !isAlreadySelected) {
+            Log.d("CourseCheck", "Auto-select enabled and has vacancy, will proceed to select course")
+            // 不关闭WebView，让WebView层继续执行选课
+            uiState = uiState.copy(isSelecting = true, showWebView = true)
+        } else {
+            // 其他情况关闭WebView
+            uiState = uiState.copy(showWebView = false)
+        }
     }
     
     fun dismissResult() {
-        uiState = uiState.copy(result = null, errorMessage = null, showSuccessMessage = null)
+        uiState = uiState.copy(result = null, errorMessage = null, showSuccessMessage = null, selectResult = null)
     }
 
     fun clearSuccessMessage() {
         uiState = uiState.copy(showSuccessMessage = null)
+    }
+    
+    fun onSelectButtonClickResult(success: Boolean, message: String) {
+        Log.d("CourseCheck", "Select button click result: success=$success, message=$message")
+        // 选课按钮点击后的结果（是否成功点击，不是选课结果）
+    }
+    
+    fun onSelectResult(success: Boolean, message: String) {
+        Log.d("CourseCheck", "Select result: success=$success, message=$message")
+        uiState = uiState.copy(
+            isSelecting = false,
+            showWebView = false,
+            selectResult = SelectResult(success, message)
+        )
+    }
+    
+    fun toggleAutoSelect() {
+        viewModelScope.launch {
+            val newValue = !uiState.autoSelectEnabled
+            courseRepository.updateAutoSelectEnabled(newValue)
+            uiState = uiState.copy(autoSelectEnabled = newValue)
+        }
     }
 
     fun addToBackgroundTracking() {
@@ -134,11 +176,21 @@ data class CourseCheckUiState(
     val showWebView: Boolean = false,
     val result: VacancyResult? = null,
     val errorMessage: String? = null,
-    val showSuccessMessage: String? = null
+    val showSuccessMessage: String? = null,
+    val autoSelectEnabled: Boolean = false,
+    val isSelecting: Boolean = false,
+    val selectResult: SelectResult? = null
 )
 
 data class VacancyResult(
     val stdCount: Int,
     val limitCount: Int,
-    val hasVacancy: Boolean
+    val hasVacancy: Boolean,
+    val hasSelectButton: Boolean = false,
+    val isAlreadySelected: Boolean = false
+)
+
+data class SelectResult(
+    val success: Boolean,
+    val message: String
 )

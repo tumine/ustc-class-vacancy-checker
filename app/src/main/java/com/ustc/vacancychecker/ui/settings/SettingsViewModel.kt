@@ -21,10 +21,23 @@ class SettingsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = 15
         )
+    
+    val autoSelectEnabled: StateFlow<Boolean> = repository.autoSelectEnabledFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
 
     fun updateInterval(interval: Int) {
         viewModelScope.launch {
             repository.updateMonitoringInterval(interval)
+        }
+    }
+    
+    fun updateAutoSelectEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.updateAutoSelectEnabled(enabled)
         }
     }
 }

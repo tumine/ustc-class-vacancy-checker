@@ -16,6 +16,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 
+/**
+ * 选课结果数据类
+ */
+data class SelectResult(
+    val success: Boolean,
+    val message: String
+)
+
 @Singleton
 class BackgroundJwVacancyChecker @Inject constructor(
     @ApplicationContext private val context: Context
@@ -27,7 +35,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun performCheck(classCodes: List<String>, username: String, password: String): Result<Map<String, Int>> {
+    suspend fun performCheck(classCodes: List<String>, username: String, password: String, autoSelectEnabled: Boolean = false): Result<Map<String, Pair<Int, SelectResult?>>> {
         if (username.isBlank() || password.isBlank()) {
             return Result.failure(Exception("用户名或密码为空"))
         }
@@ -43,14 +51,16 @@ class BackgroundJwVacancyChecker @Inject constructor(
                     
                     mainHandler.post {
                         var isResumed = false
-                        val resultMap = mutableMapOf<String, Int>()
+                        val resultMap = mutableMapOf<String, Pair<Int, SelectResult?>>()
                         var currentCourseIndex = 0
+                        var isSelectingCourse = false
+                        var currentVacancy = 0
                         
                         var hasLoggedIn = false
                         var hasHandledAnnouncement = false
                         var hasEnteredCourseSelect = false
 
-                        fun resumeEx(result: Result<Map<String, Int>>) {
+                        fun resumeEx(result: Result<Map<String, Pair<Int, SelectResult?>>>) {
                             if (!isResumed && continuation.isActive) {
                                 isResumed = true
                                 try {
@@ -68,6 +78,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             if (currentCourseIndex < classCodes.size) {
                                 val code = classCodes[currentCourseIndex]
                                 Log.d(TAG, "Checking course: $code")
+                                isSelectingCourse = false
                                 val js = CourseCheckScriptUtils.getSearchCourseScript(code)
                                 webView?.evaluateJavascript(js, null)
                             } else {
@@ -148,11 +159,59 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     }
                                     
                                     @JavascriptInterface
-                                    fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String) {
-                                        Log.d(TAG, "Vacancy result: $stdCount/$limitCount (name=$courseName, teacher=$teacher)")
+                                    fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) {
+                                        Log.d(TAG, "Vacancy result: $stdCount/$limitCount (name=$courseName, teacher=$teacher, hasSelectButton=$hasSelectButton, isAlreadySelected=$isAlreadySelected)")
                                         mainHandler.post {
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
-                                                resultMap[code] = maxOf(0, limitCount - stdCount)
+                                                currentVacancy = maxOf(0, limitCount - stdCount)
+                                                
+                                                // 如果启用自动选课，有空位，有选课按钮，且未选中，则触发选课
+                                                if (autoSelectEnabled && currentVacancy > 0 && hasSelectButton && !isAlreadySelected) {
+                                                    Log.d(TAG, "Auto-select enabled for $code, triggering select...")
+                                                    isSelectingCourse = true
+                                                    mainHandler.postDelayed({
+                                                        val clickJs = CourseCheckScriptUtils.getClickSelectButtonScript(code)
+                                                        webView?.evaluateJavascript(clickJs, null)
+                                                    }, 1000)
+                                                } else {
+                                                    // 否则直接记录结果并继续下一门课
+                                                    resultMap[code] = Pair(currentVacancy, null)
+                                                    currentCourseIndex++
+                                                    checkNextCourse()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    @JavascriptInterface
+                                    fun onSelectButtonClickResult(success: Boolean, message: String) {
+                                        Log.d(TAG, "Select button click result: success=$success, message=$message")
+                                        mainHandler.post {
+                                            if (success && isSelectingCourse) {
+                                                // 等待选课结果
+                                                mainHandler.postDelayed({
+                                                    val resultJs = CourseCheckScriptUtils.getCheckSelectResultScript()
+                                                    webView?.evaluateJavascript(resultJs, null)
+                                                }, 1500)
+                                            } else if (!success) {
+                                                // 选课按钮点击失败，记录失败并继续下一门课
+                                                val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
+                                                if (code.isNotEmpty()) {
+                                                    resultMap[code] = Pair(currentVacancy, SelectResult(false, message))
+                                                    currentCourseIndex++
+                                                    checkNextCourse()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    @JavascriptInterface
+                                    fun onSelectResult(success: Boolean, message: String) {
+                                        Log.d(TAG, "Select result: success=$success, message=$message")
+                                        mainHandler.post {
+                                            val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
+                                            if (code.isNotEmpty()) {
+                                                resultMap[code] = Pair(currentVacancy, SelectResult(success, message))
                                                 currentCourseIndex++
                                                 checkNextCourse()
                                             }

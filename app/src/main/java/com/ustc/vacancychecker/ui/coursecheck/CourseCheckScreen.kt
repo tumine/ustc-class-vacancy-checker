@@ -57,10 +57,17 @@ fun CourseCheckScreen(
         WebViewCourseCheckScreen(
             classCode = uiState.classCode,
             credentials = viewModel.getCredentials(),
+            autoSelectEnabled = uiState.autoSelectEnabled,
             onNotInSelectTime = { viewModel.onNotInSelectTime() },
             onCourseNotFound = { viewModel.onCourseNotFound() },
-            onVacancyResult = { stdCount, limitCount, courseName, teacher ->
-                viewModel.onVacancyResult(stdCount, limitCount, courseName, teacher)
+            onVacancyResult = { stdCount, limitCount, courseName, teacher, hasSelectButton, isAlreadySelected ->
+                viewModel.onVacancyResult(stdCount, limitCount, courseName, teacher, hasSelectButton, isAlreadySelected)
+            },
+            onSelectButtonClickResult = { success, message ->
+                viewModel.onSelectButtonClickResult(success, message)
+            },
+            onSelectResult = { success, message ->
+                viewModel.onSelectResult(success, message)
             }
         )
         return
@@ -135,6 +142,40 @@ fun CourseCheckScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("按关键字查找课堂号")
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // 自动选课开关
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "自动选课",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "检测到空位后自动点击选课按钮",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = uiState.autoSelectEnabled,
+                        onCheckedChange = { viewModel.toggleAutoSelect() }
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.height(24.dp))
@@ -232,15 +273,26 @@ fun CourseCheckScreen(
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = if (result.hasVacancy) "✅ 有空余名额，可以选课" else "❌ 名额已满，无法选课",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (result.hasVacancy) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onErrorContainer
-                            }
-                        )
+                        // 已选课程提示
+                        if (result.isAlreadySelected) {
+                            Text(
+                                text = "✅ 已选课程",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        } else if (result.hasVacancy) {
+                            Text(
+                                text = "✅ 有空余名额，可以选课",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        } else {
+                            Text(
+                                text = "❌ 名额已满，无法选课",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "已选 ${result.stdCount} / 上限 ${result.limitCount}",
@@ -272,6 +324,55 @@ fun CourseCheckScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("加入后台跟踪队列")
+                        }
+                    }
+                }
+            }
+            
+            // 选课结果
+            uiState.selectResult?.let { selectResult ->
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (selectResult.success) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.errorContainer
+                        }
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (selectResult.success) "🎉 选课成功" else "❌ 选课失败",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (selectResult.success) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = selectResult.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (selectResult.success) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { viewModel.dismissResult() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("确定")
                         }
                     }
                 }
