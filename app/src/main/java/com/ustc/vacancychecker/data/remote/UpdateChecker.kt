@@ -49,12 +49,12 @@ class UpdateChecker @Inject constructor(
 
         val response = okHttpClient.newCall(request).execute()
 
-        if (!response.isSuccessful) {
-            throw Exception("GitHub API 请求失败: ${response.code}")
+        val body = response.use {
+            if (!it.isSuccessful) {
+                throw Exception("GitHub API 请求失败: ${it.code}")
+            }
+            it.body?.string() ?: throw Exception("响应体为空")
         }
-
-        val body = response.body?.string()
-            ?: throw Exception("响应体为空")
 
         val json = JSONObject(body)
         val tagName = json.getString("tag_name") // e.g. "v1.2.0"

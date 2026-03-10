@@ -7,6 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
+import com.ustc.vacancychecker.data.model.SelectResult
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -102,7 +103,7 @@ class ClassVacancyWorker @AssistedInject constructor(
                         if (selectResult != null) {
                             if (selectResult.success) {
                                 sendSelectSuccessNotification(course.courseId, course.courseName, selectResult.message)
-                            } else {
+                            } else if (!selectResult.isAlreadySelected) {
                                 sendSelectFailedNotification(course.courseId, course.courseName, selectResult.message)
                             }
                         } else if (vacancy > 0) {
@@ -189,7 +190,7 @@ class ClassVacancyWorker @AssistedInject constructor(
             .setAutoCancel(true)
             .build()
 
-        notificationManager.notify(courseId.hashCode() + 1000, notification)
+        notificationManager.notify("${courseId}_select_success".hashCode(), notification)
     }
     
     private fun sendSelectFailedNotification(courseId: String, courseName: String, message: String) {
@@ -214,6 +215,6 @@ class ClassVacancyWorker @AssistedInject constructor(
             .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText("[$courseName] ($courseId) 选课失败：$message"))
             .build()
 
-        notificationManager.notify(courseId.hashCode() + 2000, notification)
+        notificationManager.notify("${courseId}_select_failed".hashCode(), notification)
     }
 }

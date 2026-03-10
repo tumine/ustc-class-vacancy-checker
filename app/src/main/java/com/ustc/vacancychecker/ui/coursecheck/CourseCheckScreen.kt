@@ -226,7 +226,7 @@ fun CourseCheckScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (result.hasVacancy) {
+                        containerColor = if (result.hasVacancy || result.isAlreadySelected) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
                             MaterialTheme.colorScheme.errorContainer
@@ -315,7 +315,11 @@ fun CourseCheckScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = if (selectResult.success) "🎉 选课成功" else "❌ 选课失败",
+                            text = when {
+                                selectResult.isAlreadySelected -> "✅ 已选课程"
+                                selectResult.success -> "🎉 选课成功"
+                                else -> "❌ 选课失败"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             color = if (selectResult.success) {
                                 MaterialTheme.colorScheme.onPrimaryContainer

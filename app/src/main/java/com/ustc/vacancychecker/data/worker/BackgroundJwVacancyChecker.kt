@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
+import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,14 +17,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 
-/**
- * 选课结果数据类
- */
-data class SelectResult(
-    val success: Boolean,
-    val message: String
-)
-
 @Singleton
 class BackgroundJwVacancyChecker @Inject constructor(
     @ApplicationContext private val context: Context
@@ -32,6 +25,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
         private const val TAG = "BgJwChecker"
         private const val COURSE_SELECT_URL = "https://jw.ustc.edu.cn/for-std/course-select" 
         private const val TIMEOUT_MS = 120000L // 120秒超时，查多门课需要更长的时间
+        private const val MSG_ALREADY_SELECTED = "已选课程"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -197,7 +191,12 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 // 选课按钮点击失败，记录失败并继续下一门课
                                                 val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
                                                 if (code.isNotEmpty()) {
-                                                    resultMap[code] = Pair(currentVacancy, SelectResult(false, message))
+                                                    val isAlreadySelected = message.contains(MSG_ALREADY_SELECTED)
+                                                    resultMap[code] = Pair(currentVacancy, SelectResult(
+                                                        success = isAlreadySelected,
+                                                        message = message,
+                                                        isAlreadySelected = isAlreadySelected
+                                                    ))
                                                     currentCourseIndex++
                                                     checkNextCourse()
                                                 }

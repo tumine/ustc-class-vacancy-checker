@@ -697,7 +697,7 @@ object CourseCheckScriptUtils {
                 }
                 
                 function tryCheckResult() {
-                    // 策略1: 检查是否有成功提示
+                    if (hasResult) return true;
                     var successPatterns = ['选课成功', '成功', '已完成'];
                     var errorPatterns = ['选课失败', '失败', '错误', '已满', '冲突', '权限', '限制', '不符合', '不能', '无法'];
                     
