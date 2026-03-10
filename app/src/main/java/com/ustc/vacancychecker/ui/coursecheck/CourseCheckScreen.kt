@@ -369,7 +369,7 @@ fun CourseCheckScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
-                            onClick = { viewModel.dismissResult() },
+                            onClick = { viewModel.dismissSelectResult() },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("确定")

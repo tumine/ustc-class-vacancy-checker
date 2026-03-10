@@ -109,6 +109,10 @@ class CourseCheckViewModel @Inject constructor(
     fun dismissResult() {
         uiState = uiState.copy(result = null, errorMessage = null, showSuccessMessage = null, selectResult = null)
     }
+    
+    fun dismissSelectResult() {
+        uiState = uiState.copy(selectResult = null)
+    }
 
     fun clearSuccessMessage() {
         uiState = uiState.copy(showSuccessMessage = null)
