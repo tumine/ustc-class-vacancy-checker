@@ -43,6 +43,15 @@ object LoginScriptUtils {
                 }
                 
                 function checkError() {
+                    // 优先检测弹窗中的 exclamation-circle 图标
+                    var exclamationIcon = document.querySelector('.ant-modal-content i.anticon-exclamation-circle');
+                    if (exclamationIcon || document.querySelector('.anticon-exclamation-circle')) {
+                        console.log("Login error detected: exclamation-circle icon found");
+                        try { AndroidBridge.onLoginErrorDetected(); } catch(e) {}
+                        return;
+                    }
+                    
+                    // 次选：检测错误提示文本
                     var errorToast = document.querySelector('.error-toast .error-msg');
                     var bodyText = document.body ? document.body.innerText : '';
                     if ((errorToast && errorToast.innerText) || 
@@ -50,7 +59,7 @@ object LoginScriptUtils {
                         bodyText.includes("用户名或密码错误") ||
                         bodyText.includes("认证失败") ||
                         bodyText.includes("Incorrect user name or password")) {
-                        console.log("Login error detected");
+                        console.log("Login error detected: error text found");
                         try { AndroidBridge.onLoginErrorDetected(); } catch(e) {}
                     }
                 }

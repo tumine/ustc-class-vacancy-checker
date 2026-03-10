@@ -75,17 +75,6 @@ fun LoginScreen(
             
             Spacer(modifier = Modifier.height(48.dp))
             
-            // 错误信息
-            uiState.errorMessage?.let { error ->
-                Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            
             // WebView 登录按钮
             Button(
                 onClick = { 

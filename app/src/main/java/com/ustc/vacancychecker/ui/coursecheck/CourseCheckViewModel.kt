@@ -53,7 +53,7 @@ class CourseCheckViewModel @Inject constructor(
                 
         // 验证课堂号格式：倒数第3位应该是小数点
         if (code.length < 3 || code[code.length - 3] != '.') {
-            uiState = uiState.copy(errorMessage = "请检查课堂号（格式如MATH1001.01）")
+            uiState = uiState.copy(errorMessage = "请检查课堂号（格式如 MATH1001.01）")
             return
         }
        
