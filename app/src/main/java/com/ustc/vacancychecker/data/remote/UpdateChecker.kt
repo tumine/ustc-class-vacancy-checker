@@ -17,7 +17,9 @@ data class UpdateInfo(
     val currentVersion: String,
     val hasUpdate: Boolean,
     val releaseUrl: String,
-    val releaseNotes: String
+    val releaseNotes: String,
+    val apkDownloadUrl: String? = null,
+    val apkFileName: String? = null
 )
 
 /**
@@ -36,10 +38,11 @@ class UpdateChecker @Inject constructor(
     /**
      * 检查是否有新版本
      * @param currentVersion 当前版本号，例如 "1.3.0"
+     * @param isDebug 是否为 debug 构建
      * @return UpdateInfo 包含更新信息
      */
-    suspend fun checkForUpdate(currentVersion: String): UpdateInfo = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Checking for update, current version: $currentVersion")
+    suspend fun checkForUpdate(currentVersion: String, isDebug: Boolean = false): UpdateInfo = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Checking for update, current version: $currentVersion, isDebug: $isDebug")
 
         val request = Request.Builder()
             .url(GITHUB_API_URL)
@@ -61,6 +64,45 @@ class UpdateChecker @Inject constructor(
         val htmlUrl = json.getString("html_url")
         val releaseNotes = json.optString("body", "暂无更新说明")
 
+        // 解析 assets 获取 APK 下载链接
+        val assetsArray = json.optJSONArray("assets")
+        var apkDownloadUrl: String? = null
+        var apkFileName: String? = null
+        
+        if (assetsArray != null) {
+            // 收集所有 APK 文件
+            val apkFiles = mutableListOf<Pair<String, String>>()
+            for (i in 0 until assetsArray.length()) {
+                val asset = assetsArray.getJSONObject(i)
+                val name = asset.getString("name")
+                if (name.endsWith(".apk", ignoreCase = true)) {
+                    val url = asset.getString("browser_download_url")
+                    apkFiles.add(name to url)
+                }
+            }
+            
+            // 根据构建类型选择对应的 APK
+            val targetApk = if (isDebug) {
+                // debug 构建：优先选择包含 "debug" 的 APK
+                apkFiles.find { (name, _) -> 
+                    name.contains("debug", ignoreCase = true) 
+                } ?: apkFiles.firstOrNull()
+            } else {
+                // release 构建：优先选择包含 "release" 或不包含 "debug" 的 APK
+                apkFiles.find { (name, _) -> 
+                    name.contains("release", ignoreCase = true) 
+                } ?: apkFiles.find { (name, _) -> 
+                    !name.contains("debug", ignoreCase = true) 
+                } ?: apkFiles.firstOrNull()
+            }
+            
+            targetApk?.let { (name, url) ->
+                apkDownloadUrl = url
+                apkFileName = name
+                Log.d(TAG, "Selected APK: $name (isDebug=$isDebug)")
+            }
+        }
+
         // 去除 tag 前缀 "v" 方便比较
         val latestVersionClean = tagName.removePrefix("v").removePrefix("V")
         val currentVersionClean = currentVersion.removePrefix("v").removePrefix("V")
@@ -74,7 +116,9 @@ class UpdateChecker @Inject constructor(
             currentVersion = "v$currentVersionClean",
             hasUpdate = hasUpdate,
             releaseUrl = htmlUrl,
-            releaseNotes = releaseNotes
+            releaseNotes = releaseNotes,
+            apkDownloadUrl = apkDownloadUrl,
+            apkFileName = apkFileName
         )
     }
 

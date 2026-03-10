@@ -1,7 +1,12 @@
 package com.ustc.vacancychecker.ui.settings
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,7 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.ustc.vacancychecker.data.remote.DownloadState
 import com.ustc.vacancychecker.ui.login.LoginViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,6 +43,15 @@ fun SettingsScreen(
         listOf(5, 10, 15, 30, 60, 120, 240)
     }
     var expanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    
+    // 通知权限请求
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        // 无论权限是否授予，都开始下载
+        settingsViewModel.startDownload()
+    }
     
     Scaffold(
         topBar = {
@@ -310,9 +326,99 @@ fun SettingsScreen(
     }
 
     // 更新检查结果对话框
-    val context = LocalContext.current
     val updateInfo = uiState.updateInfo
-    if (updateInfo != null) {
+    
+    // 下载确认对话框
+    if (uiState.showDownloadConfirmDialog && updateInfo != null) {
+        AlertDialog(
+            onDismissRequest = { settingsViewModel.dismissUpdateDialog() },
+            title = { Text("确认下载") },
+            text = {
+                Column {
+                    Text("即将下载更新包:")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = updateInfo.apkFileName ?: "update.apk",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "下载将在后台进行，可在通知栏查看进度。下载完成后将自动提示安装。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // Android 13+ 需要通知权限
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            val permissionStatus = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            )
+                            if (permissionStatus == PackageManager.PERMISSION_GRANTED) {
+                                settingsViewModel.startDownload()
+                            } else {
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        } else {
+                            settingsViewModel.startDownload()
+                        }
+                    }
+                ) {
+                    Text("开始下载")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { settingsViewModel.dismissUpdateDialog() }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+    
+    // 下载状态对话框（仅在下载完成或失败时显示）
+    val downloadState by settingsViewModel.downloadState.collectAsState()
+    when (val state = downloadState) {
+        is DownloadState.Completed -> {
+            AlertDialog(
+                onDismissRequest = { settingsViewModel.resetDownload() },
+                title = { Text("下载完成") },
+                text = {
+                    Text("新版本已下载完成，是否立即安装？")
+                },
+                confirmButton = {
+                    TextButton(onClick = { settingsViewModel.installApk() }) {
+                        Text("安装")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { settingsViewModel.resetDownload() }) {
+                        Text("稍后安装")
+                    }
+                }
+            )
+        }
+        is DownloadState.Error -> {
+            AlertDialog(
+                onDismissRequest = { settingsViewModel.resetDownload() },
+                title = { Text("下载失败") },
+                text = { Text(state.message) },
+                confirmButton = {
+                    TextButton(onClick = { settingsViewModel.resetDownload() }) {
+                        Text("确定")
+                    }
+                }
+            )
+        }
+        is DownloadState.Downloading -> { /* 后台下载，不显示对话框 */ }
+        DownloadState.Idle -> { /* 不显示对话框 */ }
+    }
+    
+    if (updateInfo != null && !uiState.showDownloadConfirmDialog && downloadState == DownloadState.Idle) {
         if (updateInfo.hasUpdate) {
             AlertDialog(
                 onDismissRequest = { settingsViewModel.dismissUpdateDialog() },
@@ -338,12 +444,16 @@ fun SettingsScreen(
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateInfo.releaseUrl))
-                            context.startActivity(intent)
-                            settingsViewModel.dismissUpdateDialog()
+                            if (updateInfo.apkDownloadUrl != null) {
+                                settingsViewModel.showDownloadConfirmDialog()
+                            } else {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateInfo.releaseUrl))
+                                context.startActivity(intent)
+                                settingsViewModel.dismissUpdateDialog()
+                            }
                         }
                     ) {
-                        Text("前往下载")
+                        Text(if (updateInfo.apkDownloadUrl != null) "立即下载" else "前往下载")
                     }
                 },
                 dismissButton = {
