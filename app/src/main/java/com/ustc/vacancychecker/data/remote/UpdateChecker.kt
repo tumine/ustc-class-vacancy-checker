@@ -35,7 +35,7 @@ class UpdateChecker @Inject constructor(
 
     /**
      * 检查是否有新版本
-     * @param currentVersion 当前版本号，例如 "1.2.2"
+     * @param currentVersion 当前版本号，例如 "1.3.0"
      * @return UpdateInfo 包含更新信息
      */
     suspend fun checkForUpdate(currentVersion: String): UpdateInfo = withContext(Dispatchers.IO) {

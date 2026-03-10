@@ -10,9 +10,12 @@
 - **自动登录**：通过 USTC 统一身份认证（CAS）自动登录教务系统，凭证加密存储于本地
 - **课程多维度检索**：支持按课程名称、课堂代码、教师姓名检索全校课程
 - **课程余量查询**：支持在应用内直接查看该课程的已选人数与人数上限
-- **后台定时监控**：可将关注的课程加入跟踪列表，自动在后台定时（默认 15 分钟）轮询余量
+- **后台定时监控**：可将关注的课程加入跟踪列表，自动在后台定时轮询余量（可自定义频率）
 - **空位优先通知**：在后台监控中一旦发现名额空余，即时发送高优先级系统通知提醒
+- **自动选课**：检测到空位后自动点击选课按钮，抢课快人一步（需在设置中开启）
+- **已选课程识别**：自动识别已选课程，避免重复选课并给出提示
 - **选课公告处理**：自动消除进入选课页面后弹出的"选课公告"弹窗
+- **应用内更新检查**：支持从 GitHub Releases 检查最新版本更新
 
 ## 系统要求
 
@@ -67,10 +70,13 @@ app/src/main/java/com/ustc/vacancychecker/
 │   ├── model/
 │   │   └── TrackedCourse.kt           # 课程数据类实体
 │   ├── remote/
+│   │   ├── CatalogScriptUtils.kt      # 课程目录检索 JS 脚本
 │   │   ├── CourseCheckScriptUtils.kt  # 选课页面 JS 脚本
-│   │   └── LoginScriptUtils.kt        # 登录页面 JS 脚本
+│   │   ├── LoginScriptUtils.kt        # 登录页面 JS 脚本
+│   │   └── UpdateChecker.kt           # GitHub Releases 更新检查
 │   └── worker/
-│       └── ClassVacancyWorker.kt      # 定时检测空位后台 Worker
+│       ├── ClassVacancyWorker.kt      # 定时检测空位后台 Worker
+│       └── BackgroundJwVacancyChecker.kt # 后台 WebView 检测逻辑
 ├── di/
 │   └── AppModule.kt                   # Hilt 依赖注入模块
 └── ui/
