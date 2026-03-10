@@ -404,13 +404,14 @@ object CourseCheckScriptUtils {
                 
                 function tryReadVacancy() {
                     // TODO: 根据实际页面 DOM 结构更新选择器
-                    // 查找包含课堂号的课程行
+                    // 查找包含课堂号的课程行（大小写不敏感）
                     var rows = document.querySelectorAll('tr, .course-row, .course-item');
                     var targetRow = null;
+                    var searchCode = "$safeCode".toLowerCase();
                     
                     for (var i = 0; i < rows.length; i++) {
-                        var rowText = rows[i].innerText || rows[i].textContent || '';
-                        if (rowText.indexOf("$safeCode") !== -1) {
+                        var rowText = (rows[i].innerText || rows[i].textContent || '').toLowerCase();
+                        if (rowText.indexOf(searchCode) !== -1) {
                             targetRow = rows[i];
                             break;
                         }
@@ -570,13 +571,14 @@ object CourseCheckScriptUtils {
                     try { AndroidBridge.logDomInfo(msg); } catch(e) { console.log(msg); }
                 }
                 
-                // 查找包含课堂号的课程行
+                // 查找包含课堂号的课程行（大小写不敏感）
                 var rows = document.querySelectorAll('tr, .course-row, .course-item');
                 var targetRow = null;
+                var searchCode = "$safeCode".toLowerCase();
                 
                 for (var i = 0; i < rows.length; i++) {
-                    var rowText = rows[i].innerText || rows[i].textContent || '';
-                    if (rowText.indexOf("$safeCode") !== -1) {
+                    var rowText = (rows[i].innerText || rows[i].textContent || '').toLowerCase();
+                    if (rowText.indexOf(searchCode) !== -1) {
                         targetRow = rows[i];
                         break;
                     }

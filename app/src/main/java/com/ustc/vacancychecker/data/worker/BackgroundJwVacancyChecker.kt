@@ -151,7 +151,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     fun onSearchComplete(code: String) {
                                         Log.d(TAG, "Search complete, reading vacancy...")
                                         mainHandler.post {
-                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
+                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 val js = CourseCheckScriptUtils.getReadVacancyScript(code)
                                                 webView?.evaluateJavascript(js, null)
                                             }
@@ -162,7 +162,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) {
                                         Log.d(TAG, "Vacancy result: $stdCount/$limitCount (name=$courseName, teacher=$teacher, hasSelectButton=$hasSelectButton, isAlreadySelected=$isAlreadySelected)")
                                         mainHandler.post {
-                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
+                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 currentVacancy = maxOf(0, limitCount - stdCount)
                                                 
                                                 // 如果启用自动选课，有空位，有选课按钮，且未选中，则触发选课
@@ -222,7 +222,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     fun onCourseNotFound(code: String) {
                                         Log.w(TAG, "Course not found")
                                         mainHandler.post {
-                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] == code) {
+                                            if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 // 没找到则直接继续下一门课，不报错
                                                 currentCourseIndex++
                                                 checkNextCourse()
