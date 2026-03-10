@@ -441,18 +441,55 @@ object CourseCheckScriptUtils {
                     var selectButton = targetRow.querySelector('button, a, span[onclick], input[type="button"]');
                     var hasSelectButton = false;
                     var isAlreadySelected = false;
-                    for (var bi = 0; bi < targetRow.querySelectorAll('button, a, span, input[type="button"]').length; bi++) {
-                        var btn = targetRow.querySelectorAll('button, a, span, input[type="button"]')[bi];
-                        var btnText = (btn.innerText || btn.textContent || btn.value || '').trim();
-                        if (btnText.indexOf('选课') !== -1 && btn.offsetWidth > 0) {
-                            hasSelectButton = true;
-                            break;
-                        }
-                        if (btnText.indexOf('退课') !== -1 && btn.offsetWidth > 0) {
+                    
+                    // 策略1: 检测选课状态字段（优先级最高）
+                    var allCells = targetRow.querySelectorAll('td, .cell, span, div');
+                    for (var ci = 0; ci < allCells.length; ci++) {
+                        var cellText = (allCells[ci].innerText || allCells[ci].textContent || '').trim();
+                        // 检测"已选中"、"已选"、"选中"等关键词
+                        if (cellText === '已选中' || cellText === '已选' || cellText === '选中' || 
+                            cellText.indexOf('已选中') !== -1 || cellText.indexOf('(已选)') !== -1 ||
+                            cellText.indexOf('【已选】') !== -1 || cellText.indexOf('[已选]') !== -1) {
                             isAlreadySelected = true;
+                            console.log("Detected '已选中' status in cell: " + cellText);
                             break;
                         }
                     }
+                    
+                    // 策略2: 检测退课按钮（如果策略1没有检测到）
+                    if (!isAlreadySelected) {
+                        var allButtons = targetRow.querySelectorAll('button, a, span, input[type="button"], div[onclick]');
+                        for (var bi = 0; bi < allButtons.length; bi++) {
+                            var btn = allButtons[bi];
+                            var btnText = (btn.innerText || btn.textContent || btn.value || '').trim();
+                            // 检测退课按钮
+                            if ((btnText.indexOf('退课') !== -1 || btnText.indexOf('退选') !== -1) && btn.offsetWidth > 0) {
+                                isAlreadySelected = true;
+                                console.log("Detected '退课' button: " + btnText);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 策略3: 检测选课按钮
+                    if (!isAlreadySelected) {
+                        var allButtons2 = targetRow.querySelectorAll('button, a, span, input[type="button"], div[onclick]');
+                        for (var bi2 = 0; bi2 < allButtons2.length; bi2++) {
+                            var btn2 = allButtons2[bi2];
+                            var btnText2 = (btn2.innerText || btn2.textContent || btn2.value || '').trim();
+                            // 检测选课按钮（排除退课按钮）
+                            if ((btnText2.indexOf('选课') !== -1 || btnText2.indexOf('选') !== -1) && 
+                                btnText2.indexOf('退') === -1 && btn2.offsetWidth > 0) {
+                                hasSelectButton = true;
+                                console.log("Detected '选课' button: " + btnText2);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 输出调试信息
+                    console.log("Detection result - isAlreadySelected: " + isAlreadySelected + ", hasSelectButton: " + hasSelectButton);
+                    try { AndroidBridge.logDomInfo("Course row detection - isAlreadySelected: " + isAlreadySelected + ", hasSelectButton: " + hasSelectButton); } catch(e) {}
 
                     if (!courseNameEl || !teacherEl) {
                         var cellsList = targetRow.querySelectorAll('td');

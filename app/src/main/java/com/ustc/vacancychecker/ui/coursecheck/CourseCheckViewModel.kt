@@ -95,13 +95,22 @@ class CourseCheckViewModel @Inject constructor(
             )
         )
         
-        // 如果有空位且启用自动选课且有选课按钮，不关闭WebView，继续选课流程
-        if (hasVacancy && uiState.autoSelectEnabled && hasSelectButton && !isAlreadySelected) {
+        // 如果是已选课程，显示提示弹窗
+        if (isAlreadySelected) {
+            Log.d("CourseCheck", "Course already selected, showing notification")
+            uiState = uiState.copy(
+                showWebView = false,
+                selectResult = SelectResult(false, "该课程已选，无需重复选课")
+            )
+        }
+        // 如果有空位且启用自动选课且有选课按钮且未选，不关闭WebView，继续选课流程
+        else if (hasVacancy && uiState.autoSelectEnabled && hasSelectButton) {
             Log.d("CourseCheck", "Auto-select enabled and has vacancy, will proceed to select course")
             // 不关闭WebView，让WebView层继续执行选课
             uiState = uiState.copy(isSelecting = true, showWebView = true)
         } else {
             // 其他情况关闭WebView
+            Log.d("CourseCheck", "Closing WebView - hasVacancy: $hasVacancy, autoSelectEnabled: ${uiState.autoSelectEnabled}, hasSelectButton: $hasSelectButton, isAlreadySelected: $isAlreadySelected")
             uiState = uiState.copy(showWebView = false)
         }
     }
@@ -121,6 +130,14 @@ class CourseCheckViewModel @Inject constructor(
     fun onSelectButtonClickResult(success: Boolean, message: String) {
         Log.d("CourseCheck", "Select button click result: success=$success, message=$message")
         // 选课按钮点击后的结果（是否成功点击，不是选课结果）
+        // 如果是因为课程已选而失败，显示提示
+        if (!success && message.contains("已选课程")) {
+            uiState = uiState.copy(
+                showWebView = false,
+                isSelecting = false,
+                selectResult = SelectResult(false, message)
+            )
+        }
     }
     
     fun onSelectResult(success: Boolean, message: String) {
