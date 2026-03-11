@@ -417,25 +417,58 @@ object CourseCheckScriptUtils {
                         }
                     }
                     
-                    // 如果匹配到多个课程，报错提示
+                    // 如果匹配到多个课程，优先选择"已选"的课程
+                    var targetRow = null;
                     if (matchedRows.length > 1) {
-                        console.log("Multiple courses matched code '$safeCode', count: " + matchedRows.length);
-                        try { AndroidBridge.onMultipleCoursesFound("$safeCode", matchedRows.length); } catch(e) {
-                            // 如果没有这个回调，使用 onCourseNotFound
-                            try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e2) {}
+                        console.log("Multiple courses matched code '$safeCode', count: " + matchedRows.length + ", selecting the one with '已选' status");
+                        
+                        // 遍历所有匹配的行，寻找"已选"的课程
+                        for (var mi = 0; mi < matchedRows.length; mi++) {
+                            var row = matchedRows[mi];
+                            var allCells = row.querySelectorAll('td, .cell, span, div');
+                            for (var ci = 0; ci < allCells.length; ci++) {
+                                var cellText = (allCells[ci].innerText || allCells[ci].textContent || '').trim();
+                                // 检测"已选中"、"已选"、"选中"等关键词
+                                if (cellText === '已选中' || cellText === '已选' || cellText === '选中' || 
+                                    cellText.indexOf('已选中') !== -1 || cellText.indexOf('(已选)') !== -1 ||
+                                    cellText.indexOf('【已选】') !== -1 || cellText.indexOf('[已选]') !== -1) {
+                                    targetRow = row;
+                                    console.log("Found '已选中' row among multiple matches");
+                                    break;
+                                }
+                            }
+                            if (targetRow) break;
+                            
+                            // 也检测退课按钮
+                            var allButtons = row.querySelectorAll('button, a, span, input[type="button"], div[onclick]');
+                            for (var bi = 0; bi < allButtons.length; bi++) {
+                                var btn = allButtons[bi];
+                                var btnText = (btn.innerText || btn.textContent || btn.value || '').trim();
+                                if ((btnText.indexOf('退课') !== -1 || btnText.indexOf('退选') !== -1) && btn.offsetWidth > 0) {
+                                    targetRow = row;
+                                    console.log("Found row with '退课' button among multiple matches");
+                                    break;
+                                }
+                            }
+                            if (targetRow) break;
                         }
-                        return true;
+                        
+                        // 如果没有找到"已选"的课程，选择第一个
+                        if (!targetRow) {
+                            targetRow = matchedRows[0];
+                            console.log("No '已选' row found, using first match");
+                        }
+                    } else if (matchedRows.length === 1) {
+                        targetRow = matchedRows[0];
                     }
                     
-                    if (matchedRows.length === 0) {
+                    if (!targetRow) {
                         if (attempts >= maxAttempts - 1) {
                             console.log("Course with code '$safeCode' not found");
                             try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                         }
                         return false;
                     }
-                    
-                    var targetRow = matchedRows[0];
                     
                     console.log("Found course row for code: $safeCode");
                     
