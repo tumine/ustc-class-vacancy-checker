@@ -32,13 +32,6 @@ class SettingsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = 60
         )
-    
-    val autoSelectEnabled: StateFlow<Boolean> = repository.autoSelectEnabledFlow
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = false
-        )
 
     var uiState by mutableStateOf(SettingsUiState())
         private set
@@ -48,12 +41,6 @@ class SettingsViewModel @Inject constructor(
     fun updateInterval(interval: Int) {
         viewModelScope.launch {
             repository.updateMonitoringInterval(interval)
-        }
-    }
-    
-    fun updateAutoSelectEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            repository.updateAutoSelectEnabled(enabled)
         }
     }
 

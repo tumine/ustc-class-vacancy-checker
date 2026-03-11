@@ -134,19 +134,21 @@ class CourseLookupViewModel @Inject constructor(
         val selectedCodes = uiState.selectedForTracking
         if (selectedCodes.isEmpty()) return
 
-        val coursesToTrack = uiState.results
-            .filter { selectedCodes.contains(it.classCode) }
-            .map {
-                TrackedCourse(
-                    courseId = it.classCode,
-                    courseName = it.courseName,
-                    teacher = it.teacher,
-                    isMonitoring = true
-                )
-            }
-
         viewModelScope.launch {
             try {
+                val defaultAutoSelect = courseRepository.isAutoSelectEnabled()
+                val coursesToTrack = uiState.results
+                    .filter { selectedCodes.contains(it.classCode) }
+                    .map {
+                        TrackedCourse(
+                            courseId = it.classCode,
+                            courseName = it.courseName,
+                            teacher = it.teacher,
+                            isMonitoring = true,
+                            autoSelectEnabled = defaultAutoSelect
+                        )
+                    }
+                
                 courseRepository.addTrackedCourses(coursesToTrack)
                 uiState = uiState.copy(
                     selectedForTracking = emptySet(),

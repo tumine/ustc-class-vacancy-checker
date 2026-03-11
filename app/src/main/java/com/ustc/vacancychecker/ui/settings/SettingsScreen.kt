@@ -36,7 +36,6 @@ fun SettingsScreen(
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
-    val autoSelectEnabled by settingsViewModel.autoSelectEnabled.collectAsState()
     val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
         listOf(1, 5, 10, 15, 30, 60, 120, 240)
     } else {
@@ -125,42 +124,6 @@ fun SettingsScreen(
                             }
                         }
                     }
-                }
-            }
-            
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-            
-            Text(
-                text = "选课设置",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
-            )
-            
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { settingsViewModel.updateAutoSelectEnabled(!autoSelectEnabled) }
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "自动选课", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            text = "检测到空位后自动点击选课按钮（谨慎使用）",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                    Switch(
-                        checked = autoSelectEnabled,
-                        onCheckedChange = { settingsViewModel.updateAutoSelectEnabled(it) }
-                    )
                 }
             }
             

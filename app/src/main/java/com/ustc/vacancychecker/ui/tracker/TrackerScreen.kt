@@ -20,6 +20,7 @@ import java.util.Date
 import java.util.Locale
 
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -93,6 +94,12 @@ fun TrackerScreen(
                         onToggle = { isMonitoring ->
                             viewModel.toggleMonitoring(course.courseId, isMonitoring)
                         },
+                        onAutoSelectToggle = { enabled ->
+                            viewModel.toggleAutoSelect(course.courseId, enabled)
+                        },
+                        onClearMessage = {
+                            viewModel.clearSelectMessage(course.courseId)
+                        },
                         onDelete = {
                             courseToDelete = course
                         }
@@ -130,6 +137,8 @@ fun TrackerScreen(
 fun TrackedLineItem(
     course: TrackedCourse,
     onToggle: (Boolean) -> Unit,
+    onAutoSelectToggle: (Boolean) -> Unit,
+    onClearMessage: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -164,6 +173,76 @@ fun TrackedLineItem(
             }
             
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            
+            // 自动选课开关
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "自动选课",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "检测到空位后自动尝试选课",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = course.autoSelectEnabled ?: false,
+                    onCheckedChange = { onAutoSelectToggle(it) },
+                    enabled = course.isMonitoring
+                )
+            }
+            
+            // 选课反馈信息
+            if (!course.lastSelectMessage.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "选课结果：",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = course.lastSelectMessage ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        IconButton(
+                            onClick = onClearMessage,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Default.Close,
+                                contentDescription = "清除",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
             
             Row(
                 modifier = Modifier.fillMaxWidth(),

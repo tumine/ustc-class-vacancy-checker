@@ -29,7 +29,12 @@ class BackgroundJwVacancyChecker @Inject constructor(
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun performCheck(classCodes: List<String>, username: String, password: String, autoSelectEnabled: Boolean = false): Result<Map<String, Pair<Int, SelectResult?>>> {
+    suspend fun performCheck(
+        classCodes: List<String>,
+        username: String,
+        password: String,
+        autoSelectMap: Map<String, Boolean> = emptyMap()
+    ): Result<Map<String, Pair<Int, SelectResult?>>> {
         if (username.isBlank() || password.isBlank()) {
             return Result.failure(Exception("用户名或密码为空"))
         }
@@ -159,8 +164,11 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 currentVacancy = maxOf(0, limitCount - stdCount)
                                                 
+                                                // 获取该课程的自动选课开关状态
+                                                val courseAutoSelectEnabled = autoSelectMap[code] ?: false
+                                                
                                                 // 如果启用自动选课，有空位，有选课按钮，且未选中，则触发选课
-                                                if (autoSelectEnabled && currentVacancy > 0 && hasSelectButton && !isAlreadySelected) {
+                                                if (courseAutoSelectEnabled && currentVacancy > 0 && hasSelectButton && !isAlreadySelected) {
                                                     Log.d(TAG, "Auto-select enabled for $code, triggering select...")
                                                     isSelectingCourse = true
                                                     mainHandler.postDelayed({
