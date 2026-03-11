@@ -186,7 +186,7 @@ fun TrackedLineItem(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        text = "检测到空位后自动尝试选课",
+                        text = "检测到空位后自动尝试选课（对于已选中课程无效）",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
