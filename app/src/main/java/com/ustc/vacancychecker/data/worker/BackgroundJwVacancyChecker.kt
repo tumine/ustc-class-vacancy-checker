@@ -26,6 +26,8 @@ class BackgroundJwVacancyChecker @Inject constructor(
         private const val COURSE_SELECT_URL = "https://jw.ustc.edu.cn/for-std/course-select" 
         private const val TIMEOUT_MS = 120000L // 120秒超时，查多门课需要更长的时间
         private const val MSG_ALREADY_SELECTED = "已选课程"
+        private const val MAX_RETRY_COUNT = 3 // 最大重试次数
+        private const val MAX_ERROR_COUNT = 3 // 最大网络错误次数
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -58,7 +60,13 @@ class BackgroundJwVacancyChecker @Inject constructor(
                         var hasLoggedIn = false
                         var hasHandledAnnouncement = false
                         var hasEnteredCourseSelect = false
-
+                        var hasClickedAllCoursesTab = false // 是否已点击过"全部课程"选项卡
+                        
+                        // 错误处理相关
+                        var networkErrorCount = 0
+                        var searchRetryCount = mutableMapOf<String, Int>() // 每个课程的搜索重试次数
+                        var isReloading = false // 是否正在重新加载页面
+                        
                         fun resumeEx(result: Result<Map<String, Pair<Int, SelectResult?>>>) {
                             if (!isResumed && continuation.isActive) {
                                 isResumed = true
@@ -72,14 +80,53 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                 continuation.resume(result)
                             }
                         }
+                        
+                        fun reloadPage() {
+                            if (isReloading) return
+                            isReloading = true
+                            networkErrorCount++
+                            Log.w(TAG, "Reloading page due to error. Error count: $networkErrorCount")
+                            
+                            if (networkErrorCount > MAX_ERROR_COUNT) {
+                                Log.e(TAG, "Max error count reached, aborting")
+                                resumeEx(Result.failure(Exception("网络错误次数过多")))
+                                return
+                            }
+                            
+                            // 重置状态
+                            hasClickedAllCoursesTab = false
+                            hasHandledAnnouncement = false
+                            hasEnteredCourseSelect = false
+                            
+                            mainHandler.postDelayed({
+                                isReloading = false
+                                webView?.loadUrl(COURSE_SELECT_URL)
+                            }, 2000)
+                        }
 
                         fun checkNextCourse() {
                             if (currentCourseIndex < classCodes.size) {
                                 val code = classCodes[currentCourseIndex]
                                 Log.d(TAG, "Checking course: $code")
                                 isSelectingCourse = false
-                                val js = CourseCheckScriptUtils.getSearchCourseScript(code)
-                                webView?.evaluateJavascript(js, null)
+                                
+                                // 使用新的搜索策略：第一次点击选项卡，后续快速搜索
+                                val js = if (!hasClickedAllCoursesTab) {
+                                    Log.d(TAG, "First search, clicking '全部课程' tab first")
+                                    // 先点击选项卡，延迟后再搜索
+                                    webView?.evaluateJavascript(CourseCheckScriptUtils.getClickAllCoursesTabScript(), null)
+                                    hasClickedAllCoursesTab = true
+                                    // 延迟后执行快速搜索
+                                    mainHandler.postDelayed({
+                                        webView?.evaluateJavascript(CourseCheckScriptUtils.getQuickSearchScript(code), null)
+                                    }, 1500)
+                                    null
+                                } else {
+                                    Log.d(TAG, "Subsequent search, using quick search")
+                                    CourseCheckScriptUtils.getQuickSearchScript(code)
+                                }
+                                
+                                js?.let { webView?.evaluateJavascript(it, null) }
                             } else {
                                 Log.d(TAG, "All courses checked. Results: $resultMap")
                                 resumeEx(Result.success(resultMap))
@@ -147,12 +194,44 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     }
                                     
                                     @JavascriptInterface
+                                    fun onTabClicked(success: Boolean) {
+                                        Log.d(TAG, "Tab clicked result: success=$success")
+                                        if (!success) {
+                                            mainHandler.post {
+                                                Log.w(TAG, "Failed to click '全部课程' tab, retrying...")
+                                                hasClickedAllCoursesTab = false
+                                                checkNextCourse()
+                                            }
+                                        }
+                                    }
+                                    
+                                    @JavascriptInterface
                                     fun onSearchComplete(code: String) {
                                         Log.d(TAG, "Search complete, reading vacancy...")
                                         mainHandler.post {
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 val js = CourseCheckScriptUtils.getReadVacancyScript(code)
                                                 webView?.evaluateJavascript(js, null)
+                                            }
+                                        }
+                                    }
+                                    
+                                    @JavascriptInterface
+                                    fun onSearchError(code: String, message: String) {
+                                        Log.w(TAG, "Search error for $code: $message")
+                                        mainHandler.post {
+                                            // 搜索失败，尝试重试
+                                            val retryCount = searchRetryCount.getOrDefault(code, 0)
+                                            if (retryCount < MAX_RETRY_COUNT) {
+                                                searchRetryCount[code] = retryCount + 1
+                                                Log.d(TAG, "Retrying search for $code (attempt ${retryCount + 1})")
+                                                mainHandler.postDelayed({
+                                                    webView?.evaluateJavascript(CourseCheckScriptUtils.getQuickSearchScript(code), null)
+                                                }, 1000)
+                                            } else {
+                                                Log.w(TAG, "Max retry count reached for $code, skipping")
+                                                currentCourseIndex++
+                                                checkNextCourse()
                                             }
                                         }
                                     }
@@ -266,8 +345,25 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     
                                     override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                                         super.onReceivedError(view, request, error)
-                                        if (request?.isForMainFrame == true) {
-                                            Log.w(TAG, "WebView error: ${error?.description}")
+                                        Log.w(TAG, "WebView error: ${error?.description}, url: ${request?.url}")
+                                        
+                                        // 只处理主框架的错误
+                                        if (request?.isForMainFrame == true && !isResumed) {
+                                            mainHandler.post {
+                                                reloadPage()
+                                            }
+                                        }
+                                    }
+                                    
+                                    override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+                                        super.onReceivedHttpError(view, request, errorResponse)
+                                        Log.w(TAG, "HTTP error: ${errorResponse?.statusCode}, url: ${request?.url}")
+                                        
+                                        // 只处理主框架的错误
+                                        if (request?.isForMainFrame == true && !isResumed) {
+                                            mainHandler.post {
+                                                reloadPage()
+                                            }
                                         }
                                     }
                                 }
