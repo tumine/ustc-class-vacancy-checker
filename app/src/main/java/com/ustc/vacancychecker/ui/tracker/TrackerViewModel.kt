@@ -56,11 +56,12 @@ class TrackerViewModel @Inject constructor(
     }
 
     fun refreshAll(context: android.content.Context) {
+        val appContext = context.applicationContext
         val intervalMinutes = monitoringInterval.value.toLong()
         val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildImmediateOneTimeRequest(intervalMinutes)
 
         // REPLACE 会自动替换同名 unique work，无需先 cancel
-        androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
+        androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork(
             com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME,
             androidx.work.ExistingWorkPolicy.REPLACE,
             workRequest
@@ -71,7 +72,7 @@ class TrackerViewModel @Inject constructor(
             android.util.Log.d("TrackerViewModel", "Work enqueued successfully")
 
             // 检查网络状态（使用现代 API）
-            val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val connectivityManager = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             val activeNetwork = connectivityManager.activeNetwork
             val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
             val hasInternet = networkCapabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
@@ -80,7 +81,7 @@ class TrackerViewModel @Inject constructor(
             // 检查 WorkManager 状态
             viewModelScope.launch {
                 try {
-                    val workInfo = androidx.work.WorkManager.getInstance(context)
+                    val workInfo = androidx.work.WorkManager.getInstance(appContext)
                         .getWorkInfosForUniqueWork(com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME)
                         .await()
                     android.util.Log.d("TrackerViewModel", "WorkInfo: $workInfo")
