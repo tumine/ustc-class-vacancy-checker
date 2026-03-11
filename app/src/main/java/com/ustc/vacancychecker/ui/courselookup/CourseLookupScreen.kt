@@ -117,16 +117,15 @@ fun CourseLookupScreen(
                     value = uiState.keyword,
                     onValueChange = { viewModel.updateKeyword(it) },
                     label = { Text("搜索关键字") },
-                    placeholder = { 
-                        Text(if (uiState.searchType == SearchType.COURSE) "输入课程名或编号" else "输入教师名") 
+                    placeholder = {
+                        Text(if (uiState.searchType == SearchType.COURSE) "输入课程名或编号" else "输入教师名")
                     },
                     singleLine = true,
                     leadingIcon = {
                         Icon(Icons.Filled.Search, contentDescription = null)
                     },
-                    visualTransformation = androidx.compose.ui.text.input.VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
                         autoCorrect = false,
                         imeAction = ImeAction.Search
                     ),
