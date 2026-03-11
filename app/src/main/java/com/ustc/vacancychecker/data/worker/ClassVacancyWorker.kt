@@ -26,8 +26,9 @@ class ClassVacancyWorker @AssistedInject constructor(
         private const val KEY_INTERVAL_MINUTES = "interval_minutes"
 
         fun buildOneTimeRequest(intervalMinutes: Long, recursive: Boolean = true): androidx.work.OneTimeWorkRequest {
+            // 临时移除网络约束，用于测试
             val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                // .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
                 .build()
 
             val data = androidx.work.workDataOf(
@@ -51,8 +52,10 @@ class ClassVacancyWorker @AssistedInject constructor(
          * @param nextIntervalMinutes interval in minutes for subsequent periodic runs (0 to disable re-scheduling)
          */
         fun buildImmediateOneTimeRequest(nextIntervalMinutes: Long): androidx.work.OneTimeWorkRequest {
+            Log.d("ClassVacancyWorker", "Building immediate request, nextInterval=$nextIntervalMinutes")
+            // 临时移除网络约束，用于测试
             val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                // .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
                 .build()
 
             val data = androidx.work.workDataOf(
