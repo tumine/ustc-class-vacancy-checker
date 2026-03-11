@@ -56,38 +56,37 @@ class TrackerViewModel @Inject constructor(
     }
 
     fun refreshAll(context: android.content.Context) {
-        val appContext = context.applicationContext
         val intervalMinutes = monitoringInterval.value.toLong()
+        android.util.Log.d("TrackerViewModel", "refreshAll called, interval=$intervalMinutes")
         val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildImmediateOneTimeRequest(intervalMinutes)
-
-        // REPLACE 会自动替换同名 unique work，无需先 cancel
-        androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork(
+        
+        // 先取消之前的工作
+        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(
+            com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME
+        )
+        
+        // 然后入队新的工作
+        androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
             com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME,
             androidx.work.ExistingWorkPolicy.REPLACE,
             workRequest
         )
-
-        if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
-            android.util.Log.d("TrackerViewModel", "refreshAll called, interval=$intervalMinutes")
-            android.util.Log.d("TrackerViewModel", "Work enqueued successfully")
-
-            // 检查网络状态（使用现代 API）
-            val connectivityManager = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-            val activeNetwork = connectivityManager.activeNetwork
-            val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-            val hasInternet = networkCapabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-            android.util.Log.d("TrackerViewModel", "Network has internet capability: $hasInternet")
-
-            // 检查 WorkManager 状态
-            viewModelScope.launch {
-                try {
-                    val workInfo = androidx.work.WorkManager.getInstance(appContext)
-                        .getWorkInfosForUniqueWork(com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME)
-                        .await()
-                    android.util.Log.d("TrackerViewModel", "WorkInfo: $workInfo")
-                } catch (e: Exception) {
-                    android.util.Log.e("TrackerViewModel", "Failed to get work info", e)
-                }
+        android.util.Log.d("TrackerViewModel", "Work enqueued successfully")
+        
+        // 检查网络状态
+        val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetworkInfo
+        android.util.Log.d("TrackerViewModel", "Network connected: ${activeNetwork?.isConnected}")
+        
+        // 检查 WorkManager 状态
+        viewModelScope.launch {
+            try {
+                val workInfo = androidx.work.WorkManager.getInstance(context)
+                    .getWorkInfosForUniqueWork(com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME)
+                    .await()
+                android.util.Log.d("TrackerViewModel", "WorkInfo: $workInfo")
+            } catch (e: Exception) {
+                android.util.Log.e("TrackerViewModel", "Failed to get work info", e)
             }
         }
     }
