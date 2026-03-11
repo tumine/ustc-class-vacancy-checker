@@ -8,5 +8,7 @@ data class TrackedCourse(
     @SerializedName("teacher") val teacher: String = "",
     @SerializedName("vacancy") val vacancy: Int = 0,
     @SerializedName("lastCheckTime") val lastCheckTime: Long = 0L,
-    @SerializedName("isMonitoring") val isMonitoring: Boolean = true
+    @SerializedName("isMonitoring") val isMonitoring: Boolean = true,
+    @SerializedName("autoSelectEnabled") val autoSelectEnabled: Boolean? = false,
+    @SerializedName("lastSelectMessage") val lastSelectMessage: String? = ""
 )

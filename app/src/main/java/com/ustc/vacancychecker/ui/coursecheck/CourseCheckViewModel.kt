@@ -165,6 +165,7 @@ class CourseCheckViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val vacancyResult = uiState.result
+                val defaultAutoSelect = courseRepository.isAutoSelectEnabled()
                 courseRepository.addTrackedCourses(listOf(
                     TrackedCourse(
                         courseId = code,
@@ -172,7 +173,8 @@ class CourseCheckViewModel @Inject constructor(
                         teacher = uiState.teacher ?: "未知",
                         isMonitoring = true,
                         lastCheckTime = System.currentTimeMillis(),
-                        vacancy = vacancyResult?.let { it.limitCount - it.stdCount }?.takeIf { it >= 0 } ?: 0
+                        vacancy = vacancyResult?.let { it.limitCount - it.stdCount }?.takeIf { it >= 0 } ?: 0,
+                        autoSelectEnabled = defaultAutoSelect
                     )
                 ))
                 uiState = uiState.copy(showSuccessMessage = "成功加入后台跟踪队列")

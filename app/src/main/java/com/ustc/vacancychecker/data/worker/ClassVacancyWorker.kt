@@ -26,8 +26,9 @@ class ClassVacancyWorker @AssistedInject constructor(
         private const val KEY_INTERVAL_MINUTES = "interval_minutes"
 
         fun buildOneTimeRequest(intervalMinutes: Long, recursive: Boolean = true): androidx.work.OneTimeWorkRequest {
+            // 临时移除网络约束，用于测试
             val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                // .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
                 .build()
 
             val data = androidx.work.workDataOf(
@@ -51,8 +52,10 @@ class ClassVacancyWorker @AssistedInject constructor(
          * @param nextIntervalMinutes interval in minutes for subsequent periodic runs (0 to disable re-scheduling)
          */
         fun buildImmediateOneTimeRequest(nextIntervalMinutes: Long): androidx.work.OneTimeWorkRequest {
+            Log.d("ClassVacancyWorker", "Building immediate request, nextInterval=$nextIntervalMinutes")
+            // 临时移除网络约束，用于测试
             val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                // .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
                 .build()
 
             val data = androidx.work.workDataOf(
@@ -68,8 +71,13 @@ class ClassVacancyWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
-        val courses = repository.getTrackedCourses().filter { it.isMonitoring }
+        Log.d("ClassVacancyWorker", "=== doWork() called ===")
+        val allCourses = repository.getTrackedCourses()
+        Log.d("ClassVacancyWorker", "Total courses: ${allCourses.size}")
+        val courses = allCourses.filter { it.isMonitoring }
+        Log.d("ClassVacancyWorker", "Monitoring courses: ${courses.size}")
         if (courses.isEmpty()) {
+            Log.d("ClassVacancyWorker", "No courses to monitor, returning success")
             return Result.success()
         }
 
@@ -83,11 +91,12 @@ class ClassVacancyWorker @AssistedInject constructor(
                 return Result.failure()
             }
             
-            val autoSelectEnabled = repository.isAutoSelectEnabled()
-            Log.d("ClassVacancyWorker", "Auto select enabled: $autoSelectEnabled")
+            // 构建每个课程的自动选课开关映射
+            val autoSelectMap = courses.associate { it.courseId to (it.autoSelectEnabled ?: false) }
+            Log.d("ClassVacancyWorker", "Auto select map: $autoSelectMap")
 
             val classCodes = courses.map { it.courseId }
-            val result = bgJwChecker.performCheck(classCodes, username, password, autoSelectEnabled)
+            val result = bgJwChecker.performCheck(classCodes, username, password, autoSelectMap)
 
             if (result.isSuccess) {
                 val vacancyMap = result.getOrThrow()
@@ -97,18 +106,33 @@ class ClassVacancyWorker @AssistedInject constructor(
                         val vacancy = data.first
                         val selectResult = data.second
                         Log.d("ClassVacancyWorker", "Check ${course.courseId}: $vacancy vacancy available, selectResult=$selectResult")
-                        repository.updateCourseStatus(course.courseId, vacancy)
                         
                         // 如果有选课结果
                         if (selectResult != null) {
                             if (selectResult.success) {
+                                // 选课成功：发送通知并删除课程
                                 sendSelectSuccessNotification(course.courseId, course.courseName, selectResult.message)
+                                repository.removeTrackedCourse(course.courseId)
                             } else if (!selectResult.isAlreadySelected) {
+                                // 选课失败：发送通知，存储反馈信息，关闭自动选课开关
                                 sendSelectFailedNotification(course.courseId, course.courseName, selectResult.message)
+                                repository.updateCourseStatus(
+                                    courseId = course.courseId,
+                                    vacancy = vacancy,
+                                    autoSelectEnabled = false,
+                                    lastSelectMessage = selectResult.message
+                                )
+                            } else {
+                                // 已选课程：仅更新状态
+                                repository.updateCourseStatus(course.courseId, vacancy)
                             }
                         } else if (vacancy > 0) {
                             // 只有空位但没有自动选课（可能已选或未启用自动选课）
                             sendVacancyNotification(course.courseId, course.courseName, vacancy)
+                            repository.updateCourseStatus(course.courseId, vacancy)
+                        } else {
+                            // 没有空位，仅更新状态
+                            repository.updateCourseStatus(course.courseId, vacancy)
                         }
                     } else {
                         Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in jw data")

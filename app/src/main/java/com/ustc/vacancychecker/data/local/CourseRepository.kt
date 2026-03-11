@@ -70,7 +70,7 @@ class CourseRepository @Inject constructor(
     private fun safeParseTrackedCourses(jsonString: String): MutableList<TrackedCourse> {
         return try {
             gson.fromJson(jsonString, trackedCoursesType) ?: mutableListOf()
-        } catch (e: com.google.gson.JsonSyntaxException) {
+        } catch (e: Exception) {
             android.util.Log.e("CourseRepository", "Failed to parse tracked courses, resetting to empty list", e)
             mutableListOf()
         }
@@ -107,18 +107,26 @@ class CourseRepository @Inject constructor(
         }
     }
 
-    suspend fun updateCourseStatus(courseId: String, vacancy: Int? = null, isMonitoring: Boolean? = null) {
+    suspend fun updateCourseStatus(
+        courseId: String,
+        vacancy: Int? = null,
+        isMonitoring: Boolean? = null,
+        autoSelectEnabled: Boolean? = null,
+        lastSelectMessage: String? = null
+    ) {
         context.dataStore.edit { preferences ->
             val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
             val currentList = safeParseTrackedCourses(jsonString)
-            
+
             val index = currentList.indexOfFirst { it.courseId == courseId }
             if (index != -1) {
                 val item = currentList[index]
                 currentList[index] = item.copy(
                     vacancy = vacancy ?: item.vacancy,
                     lastCheckTime = System.currentTimeMillis(),
-                    isMonitoring = isMonitoring ?: item.isMonitoring
+                    isMonitoring = isMonitoring ?: item.isMonitoring,
+                    autoSelectEnabled = autoSelectEnabled ?: item.autoSelectEnabled,
+                    lastSelectMessage = lastSelectMessage ?: item.lastSelectMessage
                 )
                 preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
             }
@@ -158,6 +166,44 @@ class CourseRepository @Inject constructor(
                 val item = currentList[index]
                 currentList[index] = item.copy(
                     isMonitoring = isMonitoring
+                )
+                preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
+            }
+        }
+    }
+
+    /**
+     * 切换单个课程的自动选课开关
+     */
+    suspend fun toggleAutoSelectEnabled(courseId: String, enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
+            val currentList = safeParseTrackedCourses(jsonString)
+
+            val index = currentList.indexOfFirst { it.courseId == courseId }
+            if (index != -1) {
+                val item = currentList[index]
+                currentList[index] = item.copy(
+                    autoSelectEnabled = enabled
+                )
+                preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
+            }
+        }
+    }
+
+    /**
+     * 清除单个课程的选课反馈信息
+     */
+    suspend fun clearSelectMessage(courseId: String) {
+        context.dataStore.edit { preferences ->
+            val jsonString = preferences[TRACKED_COURSES_KEY] ?: "[]"
+            val currentList = safeParseTrackedCourses(jsonString)
+
+            val index = currentList.indexOfFirst { it.courseId == courseId }
+            if (index != -1) {
+                val item = currentList[index]
+                currentList[index] = item.copy(
+                    lastSelectMessage = ""
                 )
                 preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
             }

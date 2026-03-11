@@ -267,8 +267,156 @@ object CourseCheckScriptUtils {
     }
 
     /**
+     * 点击"全部课程"选项卡（仅在第一次搜索时使用）
+     * 通过 AndroidBridge.onSearchComplete 回调结果
+     */
+    fun getClickAllCoursesTabScript(): String {
+        return """
+            (function() {
+                var attempts = 0;
+                var maxAttempts = 20;
+                
+                function tryClickTab() {
+                    // 查找"全部课程"选项卡
+                    var tabs = document.querySelectorAll('.tab, .nav-tab, [role="tab"], a, span');
+                    var allCoursesTab = null;
+                    for (var i = 0; i < tabs.length; i++) {
+                        var text = (tabs[i].innerText || tabs[i].textContent || '').trim();
+                        if (text === '全部课程') {
+                            allCoursesTab = tabs[i];
+                            break;
+                        }
+                    }
+                    
+                    if (allCoursesTab) {
+                        console.log("Found '全部课程' tab, clicking...");
+                        allCoursesTab.click();
+                        // 延迟后通知完成
+                        setTimeout(function() {
+                            try { AndroidBridge.onTabClicked(true); } catch(e) {}
+                        }, 500);
+                        return true;
+                    }
+                    
+                    return false;
+                }
+                
+                var intervalId = setInterval(function() {
+                    attempts++;
+                    if (tryClickTab() || attempts >= maxAttempts) {
+                        clearInterval(intervalId);
+                        if (attempts >= maxAttempts) {
+                            console.log("'全部课程' tab not found after timeout");
+                            try { AndroidBridge.onTabClicked(false); } catch(e) {}
+                        }
+                    }
+                }, 500);
+            })();
+        """.trimIndent()
+    }
+    
+    /**
+     * 在搜索框输入课堂号并搜索（不点击选项卡，直接替换搜索内容）
+     * @param classCode 课堂号
+     */
+    fun getQuickSearchScript(classCode: String): String {
+        val safeCode = classCode.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
+        
+        return """
+            (function() {
+                var attempts = 0;
+                var maxAttempts = 20;
+                
+                // 使用原生 setter 设置值
+                var nativeSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value'
+                ).set;
+                
+                function setNativeValue(element, value) {
+                    element.focus();
+                    
+                    // 先尝试清理之前的内容
+                    nativeSetter.call(element, '');
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    
+                    try {
+                        var clearBtn = element.parentElement.querySelector('.el-input__clear, .ant-input-clear-icon, .clear-icon, i[class*="close"], i[class*="clear"]');
+                        if (clearBtn && clearBtn.offsetWidth > 0) {
+                            clearBtn.click();
+                        }
+                    } catch(e) {}
+                    
+                    // 重新填入新值
+                    nativeSetter.call(element, value);
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                    element.dispatchEvent(new Event('change', { bubbles: true }));
+                    element.dispatchEvent(new Event('keyup', { bubbles: true }));
+                }
+                
+                function trySearchCourse() {
+                    // 直接在搜索框中输入课堂号（不再点击选项卡）
+                    var inputs = document.querySelectorAll('input[placeholder*="关键词"], input[placeholder*="搜索"], input[type="search"], .search-input input, input.form-control, input.el-input__inner');
+                    var searchInput = null;
+                    for (var i = 0; i < inputs.length; i++) {
+                        if (inputs[i].offsetWidth > 0 || inputs[i].offsetHeight > 0 || inputs[i].getClientRects().length > 0) {
+                            searchInput = inputs[i];
+                            break;
+                        }
+                    }
+                    
+                    if (searchInput) {
+                        console.log("Found search input, typing class code: $safeCode");
+                        setNativeValue(searchInput, "$safeCode");
+                        
+                        // 触发搜索（模拟回车或点击搜索按钮）
+                        setTimeout(function() {
+                            searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+                            searchInput.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', keyCode: 13, bubbles: true }));
+                            searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
+                            
+                            // 也尝试点击搜索按钮
+                            var buttons = document.querySelectorAll('.search-btn, button[type="submit"], .btn-search, button.el-button--primary, button.ant-btn-primary');
+                            for (var b = 0; b < buttons.length; b++) {
+                                 if (buttons[b].offsetWidth > 0) {
+                                     var btnText = (buttons[b].innerText || '').trim();
+                                     if (btnText === '查询' || btnText === '搜索' || !!buttons[b].querySelector('i[class*="search"]')) {
+                                          buttons[b].click();
+                                          break;
+                                     } else if ((buttons[b].className || '').indexOf('search') !== -1) {
+                                          buttons[b].click();
+                                          break;
+                                     }
+                                 }
+                            }
+                            
+                            console.log("Search triggered, notifying Android...");
+                            try { AndroidBridge.onSearchComplete("$safeCode"); } catch(e) {}
+                        }, 300);
+                        
+                        return true;
+                    }
+                    
+                    return false;
+                }
+                
+                var intervalId = setInterval(function() {
+                    attempts++;
+                    if (trySearchCourse() || attempts >= maxAttempts) {
+                        clearInterval(intervalId);
+                        if (attempts >= maxAttempts) {
+                            console.log("Search input not found after timeout");
+                            try { AndroidBridge.onSearchError("$safeCode", "未找到搜索框"); } catch(e) {}
+                        }
+                    }
+                }, 500);
+            })();
+        """.trimIndent()
+    }
+    
+    /**
      * 点击"全部课程"选项卡，在搜索框输入课堂号并搜索
      * @param classCode 课堂号
+     * @deprecated 使用 getClickAllCoursesTabScript 和 getQuickSearchScript 替代
      */
     fun getSearchCourseScript(classCode: String): String {
         val safeCode = classCode.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
@@ -306,7 +454,6 @@ object CourseCheckScriptUtils {
                 
                 function trySearchCourse() {
                     // Step 1: 点击"全部课程"选项卡
-                    // TODO: 根据实际页面 DOM 结构更新选择器
                     var tabs = document.querySelectorAll('.tab, .nav-tab, [role="tab"], a, span');
                     var allCoursesTab = null;
                     for (var i = 0; i < tabs.length; i++) {
@@ -327,11 +474,9 @@ object CourseCheckScriptUtils {
                     
                     // Step 2: 延迟后在搜索框中输入课堂号
                     setTimeout(function() {
-                        // TODO: 根据实际页面 DOM 结构更新选择器
                         var inputs = document.querySelectorAll('input[placeholder*="关键词"], input[placeholder*="搜索"], input[type="search"], .search-input input, input.form-control, input.el-input__inner');
                         var searchInput = null;
                         for (var i = 0; i < inputs.length; i++) {
-                            // Find the first visible input
                             if (inputs[i].offsetWidth > 0 || inputs[i].offsetHeight > 0 || inputs[i].getClientRects().length > 0) {
                                 searchInput = inputs[i];
                                 break;
@@ -417,25 +562,58 @@ object CourseCheckScriptUtils {
                         }
                     }
                     
-                    // 如果匹配到多个课程，报错提示
+                    // 如果匹配到多个课程，优先选择"已选"的课程
+                    var targetRow = null;
                     if (matchedRows.length > 1) {
-                        console.log("Multiple courses matched code '$safeCode', count: " + matchedRows.length);
-                        try { AndroidBridge.onMultipleCoursesFound("$safeCode", matchedRows.length); } catch(e) {
-                            // 如果没有这个回调，使用 onCourseNotFound
-                            try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e2) {}
+                        console.log("Multiple courses matched code '$safeCode', count: " + matchedRows.length + ", selecting the one with '已选' status");
+                        
+                        // 遍历所有匹配的行，寻找"已选"的课程
+                        for (var mi = 0; mi < matchedRows.length; mi++) {
+                            var row = matchedRows[mi];
+                            var allCells = row.querySelectorAll('td, .cell, span, div');
+                            for (var ci = 0; ci < allCells.length; ci++) {
+                                var cellText = (allCells[ci].innerText || allCells[ci].textContent || '').trim();
+                                // 检测"已选中"、"已选"、"选中"等关键词
+                                if (cellText === '已选中' || cellText === '已选' || cellText === '选中' || 
+                                    cellText.indexOf('已选中') !== -1 || cellText.indexOf('(已选)') !== -1 ||
+                                    cellText.indexOf('【已选】') !== -1 || cellText.indexOf('[已选]') !== -1) {
+                                    targetRow = row;
+                                    console.log("Found '已选中' row among multiple matches");
+                                    break;
+                                }
+                            }
+                            if (targetRow) break;
+                            
+                            // 也检测退课按钮
+                            var allButtons = row.querySelectorAll('button, a, span, input[type="button"], div[onclick]');
+                            for (var bi = 0; bi < allButtons.length; bi++) {
+                                var btn = allButtons[bi];
+                                var btnText = (btn.innerText || btn.textContent || btn.value || '').trim();
+                                if ((btnText.indexOf('退课') !== -1 || btnText.indexOf('退选') !== -1) && btn.offsetWidth > 0) {
+                                    targetRow = row;
+                                    console.log("Found row with '退课' button among multiple matches");
+                                    break;
+                                }
+                            }
+                            if (targetRow) break;
                         }
-                        return true;
+                        
+                        // 如果没有找到"已选"的课程，选择第一个
+                        if (!targetRow) {
+                            targetRow = matchedRows[0];
+                            console.log("No '已选' row found, using first match");
+                        }
+                    } else if (matchedRows.length === 1) {
+                        targetRow = matchedRows[0];
                     }
                     
-                    if (matchedRows.length === 0) {
+                    if (!targetRow) {
                         if (attempts >= maxAttempts - 1) {
                             console.log("Course with code '$safeCode' not found");
                             try { AndroidBridge.onCourseNotFound("$safeCode"); } catch(e) {}
                         }
                         return false;
                     }
-                    
-                    var targetRow = matchedRows[0];
                     
                     console.log("Found course row for code: $safeCode");
                     

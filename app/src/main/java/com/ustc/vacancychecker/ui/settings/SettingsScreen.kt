@@ -151,7 +151,7 @@ fun SettingsScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = "自动选课", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = "检测到空位后自动点击选课按钮（谨慎使用）",
+                            text = "首页检测到空位后自动点击选课按钮",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)
