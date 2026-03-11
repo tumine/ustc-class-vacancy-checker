@@ -268,7 +268,7 @@ object CourseCheckScriptUtils {
 
     /**
      * 点击"全部课程"选项卡（仅在第一次搜索时使用）
-     * 通过 AndroidBridge.onSearchComplete 回调结果
+     * 通过 AndroidBridge.onTabClicked(true/false) 回调结果
      */
     fun getClickAllCoursesTabScript(): String {
         return """
