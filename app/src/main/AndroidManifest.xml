@@ -45,6 +45,13 @@
             </intent-filter>
         </activity>
 
+        <!-- WorkManager 前台服务 (Android 14+ 需要) -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false"
+            android:directBootAware="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
