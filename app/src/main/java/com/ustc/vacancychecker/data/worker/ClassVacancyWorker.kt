@@ -26,51 +26,20 @@ class ClassVacancyWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     companion object {
-        const val WORK_NAME = "VacancyCheckWork"
-        private const val KEY_SCHEDULE_NEXT = "schedule_next"
-        private const val KEY_INTERVAL_MINUTES = "interval_minutes"
-
-        fun buildOneTimeRequest(intervalMinutes: Long, recursive: Boolean = true): androidx.work.OneTimeWorkRequest {
-            // 临时移除网络约束，用于测试
-            val constraints = androidx.work.Constraints.Builder()
-                // .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
-                .build()
-
-            val data = androidx.work.workDataOf(
-                KEY_SCHEDULE_NEXT to recursive,
-                KEY_INTERVAL_MINUTES to intervalMinutes
-            )
-
-            // If interval is 0, start immediately, otherwise wait for intervalMinutes
-            val delayMs = if (intervalMinutes > 0) intervalMinutes * 60 * 1000 else 0
-
-            return androidx.work.OneTimeWorkRequest.Builder(ClassVacancyWorker::class.java)
-                .setConstraints(constraints)
-                .setInitialDelay(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                .setInputData(data)
-                .build()
-        }
+        const val LEGACY_PERIODIC_WORK_NAME = "VacancyCheckWork"
+        const val IMMEDIATE_WORK_NAME = "VacancyCheckWorkImmediate"
 
         /**
-         * Builds a request that starts immediately but, after completing, re-schedules
-         * the periodic chain using nextIntervalMinutes as the delay for subsequent runs.
-         * @param nextIntervalMinutes interval in minutes for subsequent periodic runs (0 to disable re-scheduling)
+         * 构建立即执行的一次性工作请求，用于手动刷新
          */
-        fun buildImmediateOneTimeRequest(nextIntervalMinutes: Long): androidx.work.OneTimeWorkRequest {
-            Log.d("ClassVacancyWorker", "Building immediate request, nextInterval=$nextIntervalMinutes")
-            // 临时移除网络约束，用于测试
+        fun buildImmediateOneTimeRequest(): androidx.work.OneTimeWorkRequest {
+            Log.d("ClassVacancyWorker", "Building immediate request")
             val constraints = androidx.work.Constraints.Builder()
-                // .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
                 .build()
-
-            val data = androidx.work.workDataOf(
-                KEY_SCHEDULE_NEXT to (nextIntervalMinutes > 0),
-                KEY_INTERVAL_MINUTES to nextIntervalMinutes
-            )
 
             return androidx.work.OneTimeWorkRequest.Builder(ClassVacancyWorker::class.java)
                 .setConstraints(constraints)
-                .setInputData(data)
                 .build()
         }
     }
@@ -159,19 +128,6 @@ class ClassVacancyWorker @AssistedInject constructor(
             Log.e("ClassVacancyWorker", "Error while fetching vacancy data", e)
             repository.updateCheckTimeForCourses(courses.map { it.courseId })
             return Result.retry()
-        } finally {
-            val scheduleNext = inputData.getBoolean(KEY_SCHEDULE_NEXT, false)
-            val intervalMinutes = inputData.getLong(KEY_INTERVAL_MINUTES, 0)
-            
-            if (!isStopped && scheduleNext && intervalMinutes > 0) {
-                Log.d("ClassVacancyWorker", "Scheduling next check in $intervalMinutes minutes")
-                val nextRequest = buildOneTimeRequest(intervalMinutes, true)
-                androidx.work.WorkManager.getInstance(appContext).enqueueUniqueWork(
-                    WORK_NAME,
-                    androidx.work.ExistingWorkPolicy.REPLACE,
-                    nextRequest
-                )
-            }
         }
 
         return Result.success()
@@ -192,12 +148,12 @@ class ClassVacancyWorker @AssistedInject constructor(
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // Android 14+ 需要指定 foregroundServiceType
             ForegroundInfo(
-                VacancyCheckerApp.FOREGROUND_NOTIFICATION_ID,
+                VacancyCheckerApp.WORKER_NOTIFICATION_ID,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             )
         } else {
-            ForegroundInfo(VacancyCheckerApp.FOREGROUND_NOTIFICATION_ID, notification)
+            ForegroundInfo(VacancyCheckerApp.WORKER_NOTIFICATION_ID, notification)
         }
     }
 

@@ -56,6 +56,7 @@ class VacancyCheckerApp : Application(), Configuration.Provider {
     companion object {
         const val CHANNEL_ID = "VacancyAlertChannel"
         const val FOREGROUND_CHANNEL_ID = "ForegroundServiceChannel"
-        const val FOREGROUND_NOTIFICATION_ID = 1001
+        const val MONITORING_SERVICE_NOTIFICATION_ID = 1001
+        const val WORKER_NOTIFICATION_ID = 1002
     }
 }

@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import androidx.work.await
 
 @HiltViewModel
 class TrackerViewModel @Inject constructor(
@@ -22,13 +21,6 @@ class TrackerViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
-        )
-
-    private val monitoringInterval: StateFlow<Int> = courseRepository.monitoringIntervalFlow
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = 15
         )
 
     fun removeCourse(courseId: String) {
@@ -56,38 +48,15 @@ class TrackerViewModel @Inject constructor(
     }
 
     fun refreshAll(context: android.content.Context) {
-        val intervalMinutes = monitoringInterval.value.toLong()
-        android.util.Log.d("TrackerViewModel", "refreshAll called, interval=$intervalMinutes")
-        val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildImmediateOneTimeRequest(intervalMinutes)
-        
-        // 先取消之前的工作
-        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(
-            com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME
-        )
-        
-        // 然后入队新的工作
-        androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
-            com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME,
-            androidx.work.ExistingWorkPolicy.REPLACE,
+        android.util.Log.d("TrackerViewModel", "refreshAll called")
+        val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildImmediateOneTimeRequest()
+
+        // 入队立即执行的工作
+        androidx.work.WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            com.ustc.vacancychecker.data.worker.ClassVacancyWorker.IMMEDIATE_WORK_NAME,
+            androidx.work.ExistingWorkPolicy.KEEP,
             workRequest
         )
-        android.util.Log.d("TrackerViewModel", "Work enqueued successfully")
-        
-        // 检查网络状态
-        val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val activeNetwork = connectivityManager.activeNetworkInfo
-        android.util.Log.d("TrackerViewModel", "Network connected: ${activeNetwork?.isConnected}")
-        
-        // 检查 WorkManager 状态
-        viewModelScope.launch {
-            try {
-                val workInfo = androidx.work.WorkManager.getInstance(context)
-                    .getWorkInfosForUniqueWork(com.ustc.vacancychecker.data.worker.ClassVacancyWorker.WORK_NAME)
-                    .await()
-                android.util.Log.d("TrackerViewModel", "WorkInfo: $workInfo")
-            } catch (e: Exception) {
-                android.util.Log.e("TrackerViewModel", "Failed to get work info", e)
-            }
-        }
+        android.util.Log.d("TrackerViewModel", "Immediate work enqueued successfully")
     }
 }
