@@ -15,19 +15,56 @@ object LoginScriptUtils {
                 if (window._credentialCaptureInjected) return;
                 window._credentialCaptureInjected = true;
                 
+                function fieldIdentity(input) {
+                    if (!input) return '';
+                    return [input.id, input.name, input.type, input.autocomplete,
+                        input.inputMode, input.placeholder, input.getAttribute('aria-label'),
+                        input.className].join(' ').toLowerCase();
+                }
+
+                function isVerificationInput(input) {
+                    var identity = fieldIdentity(input);
+                    return /otp|one.?time|verification|verify|captcha|sms|mobile|phone|auth.?code|security.?code|验证码|动态码|短信|手机/.test(identity)
+                        || input.autocomplete === 'one-time-code';
+                }
+
+                function isUsableInput(input) {
+                    return !input.disabled && !input.readOnly && input.type !== 'hidden'
+                        && input.getClientRects().length > 0;
+                }
+
+                function firstValid(selector, predicate) {
+                    var candidates = document.querySelectorAll(selector);
+                    for (var i = 0; i < candidates.length; i++) {
+                        if (isUsableInput(candidates[i]) && !isVerificationInput(candidates[i])
+                                && (!predicate || predicate(candidates[i]))) {
+                            return candidates[i];
+                        }
+                    }
+                    return null;
+                }
+
                 function findInputs() {
-                    // Angular SPA: 用户名通过 name="username" 定位
-                    var usernameInput = document.querySelector('input[name="username"]')
-                        || document.querySelector('#username')
-                        || document.querySelector('input[type="text"]');
-                        
-                    // Angular SPA: 密码在 .passwordInput 容器内，或通过 type/autocomplete 定位
-                    var passwordInput = document.querySelector('.passwordInput input')
-                        || document.querySelector('input[type="password"]')
-                        || document.querySelector('input[autocomplete="new-password"]')
-                        || document.querySelector('#password')
-                        || document.querySelector('input[name="password"]');
-                        
+                    // 密码框必须具有明确的密码语义，不能仅凭父容器判断。
+                    var passwordInput = firstValid(
+                        'input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"], #password, input[name="password"], .passwordInput input[type="password"]'
+                    );
+
+                    // 优先使用明确的用户名语义；仅当密码框存在时，才允许唯一普通文本框作为兼容回退。
+                    var usernameInput = firstValid(
+                        'input[name="username"], #username, input[autocomplete="username"], input[id*="username" i], input[name*="username" i], input[id*="account" i], input[name*="account" i], input[id*="login" i], input[name*="login" i]',
+                        function(input) { return input !== passwordInput && input.type !== 'password'; }
+                    );
+                    if (!usernameInput && passwordInput) {
+                        var textInputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type]), input[type="email"], input[type="tel"]')).filter(function(input) {
+                            return input !== passwordInput && isUsableInput(input) && !isVerificationInput(input);
+                        });
+                        if (textInputs.length === 1) usernameInput = textInputs[0];
+                    }
+
+                    if (!usernameInput || !passwordInput || usernameInput === passwordInput) {
+                        return { username: null, password: null };
+                    }
                     return { username: usernameInput, password: passwordInput };
                 }
                 
@@ -113,6 +150,8 @@ object LoginScriptUtils {
                 
                 var passwordFilled = false;
                 var usernameFilled = false;
+                var passwordElement = null;
+                var usernameElement = null;
 
                 // 使用原生 setter 设置值（作为后备方案）
                 var nativeSetter = Object.getOwnPropertyDescriptor(
@@ -135,15 +174,52 @@ object LoginScriptUtils {
                     element.dispatchEvent(new Event('blur', { bubbles: true }));
                 }
 
+                function fieldIdentity(input) {
+                    if (!input) return '';
+                    return [input.id, input.name, input.type, input.autocomplete,
+                        input.inputMode, input.placeholder, input.getAttribute('aria-label'),
+                        input.className].join(' ').toLowerCase();
+                }
+
+                function isVerificationInput(input) {
+                    var identity = fieldIdentity(input);
+                    return /otp|one.?time|verification|verify|captcha|sms|mobile|phone|auth.?code|security.?code|验证码|动态码|短信|手机/.test(identity)
+                        || input.autocomplete === 'one-time-code';
+                }
+
+                function isUsableInput(input) {
+                    return !input.disabled && !input.readOnly && input.type !== 'hidden'
+                        && input.getClientRects().length > 0;
+                }
+
+                function firstValid(selector, predicate) {
+                    var candidates = document.querySelectorAll(selector);
+                    for (var i = 0; i < candidates.length; i++) {
+                        if (isUsableInput(candidates[i]) && !isVerificationInput(candidates[i])
+                                && (!predicate || predicate(candidates[i]))) {
+                            return candidates[i];
+                        }
+                    }
+                    return null;
+                }
+
                 function findInputs() {
-                    var usernameInput = document.querySelector('input[name="username"]')
-                        || document.querySelector('#username')
-                        || document.querySelector('input[type="text"]');
-                    var passwordInput = document.querySelector('.passwordInput input')
-                        || document.querySelector('input[type="password"]')
-                        || document.querySelector('input[autocomplete="new-password"]')
-                        || document.querySelector('#password')
-                        || document.querySelector('input[name="password"]');
+                    var passwordInput = firstValid(
+                        'input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"], #password, input[name="password"], .passwordInput input[type="password"]'
+                    );
+                    var usernameInput = firstValid(
+                        'input[name="username"], #username, input[autocomplete="username"], input[id*="username" i], input[name*="username" i], input[id*="account" i], input[name*="account" i], input[id*="login" i], input[name*="login" i]',
+                        function(input) { return input !== passwordInput && input.type !== 'password'; }
+                    );
+                    if (!usernameInput && passwordInput) {
+                        var textInputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type]), input[type="email"], input[type="tel"]')).filter(function(input) {
+                            return input !== passwordInput && isUsableInput(input) && !isVerificationInput(input);
+                        });
+                        if (textInputs.length === 1) usernameInput = textInputs[0];
+                    }
+                    if (!usernameInput || !passwordInput || usernameInput === passwordInput) {
+                        return { username: null, password: null };
+                    }
                     return { username: usernameInput, password: passwordInput };
                 }
 
@@ -161,9 +237,10 @@ object LoginScriptUtils {
                 function tryFillPassword() {
                     if (passwordFilled) return;
                     var inputs = findInputs();
-                    if (inputs.password) {
+                    if (inputs.password && inputs.username) {
                         console.log("Auto-fill: Filling password immediately");
                         fillInput(inputs.password, "$safeP");
+                        passwordElement = inputs.password;
                         passwordFilled = true;
                         checkBothFilled();
                     }
@@ -178,6 +255,7 @@ object LoginScriptUtils {
                     if (icon) {
                         console.log("Auto-fill: Username icon detected (" + icon.tagName + "), filling username");
                         fillInput(inputs.username, "$safeU");
+                        usernameElement = inputs.username;
                         usernameFilled = true;
                         checkBothFilled();
                     }
@@ -199,30 +277,33 @@ object LoginScriptUtils {
                     var attempts = 0;
                     var vid = setInterval(function() {
                         attempts++;
-                        var inputs = findInputs();
-                        if (!inputs.username || !inputs.password) {
-                            passes = 0; return;
+                        // 只校验最初填充的两个元素。SPA 切换到验证码页后绝不能重新查找并写入新输入框。
+                        if (attempts >= 10) {
+                            clearInterval(vid);
+                            return;
                         }
-                        var uOk = inputs.username.value === "$safeU";
-                        var pOk = inputs.password.value === "$safeP";
+                        if (!usernameElement || !passwordElement || usernameElement === passwordElement
+                                || !document.contains(usernameElement) || !document.contains(passwordElement)) {
+                            clearInterval(vid);
+                            return;
+                        }
+                        var uOk = usernameElement.value === "$safeU";
+                        var pOk = passwordElement.value === "$safeP";
                         if (!uOk || !pOk) {
                             passes = 0;
-                            if (!uOk) fillInput(inputs.username, "$safeU");
-                            if (!pOk) fillInput(inputs.password, "$safeP");
+                            if (!uOk) fillInput(usernameElement, "$safeU");
+                            if (!pOk) fillInput(passwordElement, "$safeP");
                             return;
                         }
                         passes++;
                         if (passes >= 2 || attempts >= 10) {
                             clearInterval(vid);
                             console.log("Auto-fill: Verified, clicking login...");
-                            var btn = document.querySelector('button.login-button')
-                                || document.querySelector('button[type="submit"]')
-                                || document.querySelector('input[type="submit"]');
+                            var form = passwordElement.form || usernameElement.form;
+                            var btn = (form && form.querySelector('button.login-button, button[type="submit"], input[type="submit"]'))
+                                || document.querySelector('button.login-button');
                             if (btn) { btn.click(); }
-                            else {
-                                var form = document.querySelector('form');
-                                if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                            }
+                            else if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
                         }
                     }, 200);
                 }
@@ -248,8 +329,18 @@ object LoginScriptUtils {
                         if (!passwordFilled || !usernameFilled) {
                             console.log("Auto-fill: Timeout, force filling...");
                             var inputs = findInputs();
-                            if (inputs.username && !usernameFilled) { fillInput(inputs.username, "$safeU"); usernameFilled = true; }
-                            if (inputs.password && !passwordFilled) { fillInput(inputs.password, "$safeP"); passwordFilled = true; }
+                            if (inputs.username && inputs.password && inputs.username !== inputs.password) {
+                                if (!usernameFilled) {
+                                    fillInput(inputs.username, "$safeU");
+                                    usernameElement = inputs.username;
+                                    usernameFilled = true;
+                                }
+                                if (!passwordFilled) {
+                                    fillInput(inputs.password, "$safeP");
+                                    passwordElement = inputs.password;
+                                    passwordFilled = true;
+                                }
+                            }
                             if (usernameFilled && passwordFilled) {
                                 try { AndroidBridge.captureCredentials("$safeU", "$safeP"); } catch(e) {}
                                 startVerify();

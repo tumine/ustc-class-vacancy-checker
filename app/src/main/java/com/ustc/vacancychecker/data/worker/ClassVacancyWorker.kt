@@ -1,10 +1,15 @@
 package com.ustc.vacancychecker.data.worker
 
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import com.ustc.vacancychecker.VacancyCheckerApp
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
 import com.ustc.vacancychecker.data.model.SelectResult
@@ -76,11 +81,16 @@ class ClassVacancyWorker @AssistedInject constructor(
         Log.d("ClassVacancyWorker", "Total courses: ${allCourses.size}")
         val courses = allCourses.filter { it.isMonitoring }
         Log.d("ClassVacancyWorker", "Monitoring courses: ${courses.size}")
+        
         if (courses.isEmpty()) {
             Log.d("ClassVacancyWorker", "No courses to monitor, returning success")
             return Result.success()
         }
 
+        // 设置前台服务，确保后台执行
+        val foregroundInfo = createForegroundInfo(courses.size)
+        setForeground(foregroundInfo)
+        
         Log.d("ClassVacancyWorker", "Starting background check for ${courses.size} courses")
 
         try {
@@ -165,6 +175,30 @@ class ClassVacancyWorker @AssistedInject constructor(
         }
 
         return Result.success()
+    }
+
+    /**
+     * 创建前台服务通知信息
+     */
+    private fun createForegroundInfo(courseCount: Int): ForegroundInfo {
+        val notification = NotificationCompat.Builder(appContext, VacancyCheckerApp.FOREGROUND_CHANNEL_ID)
+            .setContentTitle("正在监控课程空位")
+            .setContentText("正在检查 $courseCount 门课程...")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+ 需要指定 foregroundServiceType
+            ForegroundInfo(
+                VacancyCheckerApp.FOREGROUND_NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            ForegroundInfo(VacancyCheckerApp.FOREGROUND_NOTIFICATION_ID, notification)
+        }
     }
 
     private fun sendVacancyNotification(courseId: String, courseName: String, vacancyCount: Int) {
