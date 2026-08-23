@@ -25,7 +25,7 @@
 | Jetpack Compose | UI 框架 |
 | Material 3 | 设计语言 |
 | Hilt | 依赖注入 |
-| WorkManager | 定时后台轮询任务 |
+| 前台服务 + WorkManager | 前台服务维持用户配置的轮询计时，WorkManager 执行单次联网检查与失败重试 |
 | DataStore | 跟踪课程列表的本地持久化 |
 | OkHttp & Gson | 轻量级原生网络请求与 JSON 解析 |
 | WebView + JavaScript 注入 | 自动化操作教务系统页面 |
@@ -71,8 +71,11 @@ app/src/main/java/com/ustc/vacancychecker/
 │   │   ├── CourseCheckScriptUtils.kt  # 选课页面 JS 脚本
 │   │   ├── LoginScriptUtils.kt        # 登录页面 JS 脚本
 │   │   └── UpdateChecker.kt           # GitHub Releases 更新检查
+│   ├── service/
+│   │   ├── CourseMonitoringService.kt # 按用户设置的间隔维持后台监控
+│   │   └── MonitoringBootReceiver.kt  # 设备重启后恢复已启用的监控
 │   └── worker/
-│       ├── ClassVacancyWorker.kt      # 定时检测空位后台 Worker
+│       ├── ClassVacancyWorker.kt      # 执行单次空位检测的后台 Worker
 │       └── BackgroundJwVacancyChecker.kt # 后台 WebView 检测逻辑
 ├── di/
 │   └── AppModule.kt                   # Hilt 依赖注入模块

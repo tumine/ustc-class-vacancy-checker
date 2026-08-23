@@ -19,45 +19,42 @@ import com.ustc.vacancychecker.ui.navigation.Routes
 import com.ustc.vacancychecker.ui.theme.UstcVacancyCheckerTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
-import androidx.work.Constraints
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.WorkManager
-import com.ustc.vacancychecker.data.worker.ClassVacancyWorker
-import java.util.concurrent.TimeUnit
+import com.ustc.vacancychecker.data.service.CourseMonitoringService
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import com.ustc.vacancychecker.data.local.CourseRepository
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    
+
     @Inject
     lateinit var credentialsManager: CredentialsManager
-    
+
     @Inject
     lateinit var courseRepository: CourseRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Stop any old periodic work
-        WorkManager.getInstance(applicationContext).cancelUniqueWork("VacancyCheckWork")
 
+        // 只在存在启用监控的课程时保持前台监控服务运行。服务自身负责读取和响应间隔变化。
         lifecycleScope.launch {
-            courseRepository.monitoringIntervalFlow.collectLatest { interval ->
-                if (interval > 0) {
-                    val workRequest = ClassVacancyWorker.buildOneTimeRequest(interval.toLong(), recursive = true)
-                    WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                        ClassVacancyWorker.WORK_NAME,
-                        ExistingWorkPolicy.REPLACE,
-                        workRequest
-                    )
-                } else {
-                    WorkManager.getInstance(applicationContext).cancelUniqueWork(ClassVacancyWorker.WORK_NAME)
-                }
+            combine(
+                courseRepository.monitoringIntervalFlow,
+                courseRepository.trackedCoursesFlow
+            ) { interval, courses ->
+                interval > 0 && courses.any { it.isMonitoring }
             }
+                .distinctUntilChanged()
+                .collectLatest { shouldMonitor ->
+                    if (shouldMonitor) {
+                        CourseMonitoringService.start(applicationContext)
+                    } else {
+                        CourseMonitoringService.stop(applicationContext)
+                    }
+                }
         }
         
         setContent {
