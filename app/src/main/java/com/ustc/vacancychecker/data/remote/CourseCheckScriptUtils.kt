@@ -545,7 +545,57 @@ object CourseCheckScriptUtils {
         return """
             (function() {
                 var attempts = 0;
-                var maxAttempts = 20;
+                // 选课页先把已选人数渲染为 0，再通过 /std-count 异步刷新。
+                // 留出足够时间等待该请求完成，不能把初始占位值当成真实人数。
+                var maxAttempts = 40;
+
+                function readCount(element) {
+                    if (!element) return null;
+
+                    // textContent 不依赖布局计算，在不同版本的 Android WebView 中
+                    // 比 innerText 更稳定；同时保留属性和值作为页面改版后的兜底。
+                    var candidates = [
+                        element.textContent,
+                        element.innerText,
+                        element.value,
+                        element.getAttribute('data-std-count'),
+                        element.getAttribute('data-limit-count'),
+                        element.getAttribute('data-count'),
+                        element.getAttribute('aria-label'),
+                        element.getAttribute('title')
+                    ];
+
+                    for (var i = 0; i < candidates.length; i++) {
+                        if (candidates[i] === null || candidates[i] === undefined) continue;
+                        var normalized = String(candidates[i]).replace(/,/g, '').trim();
+                        var match = normalized.match(/\d+/);
+                        if (match) {
+                            var value = Number(match[0]);
+                            if (Number.isFinite(value) && value >= 0) return value;
+                        }
+                    }
+                    return null;
+                }
+
+                function hasLoadedCountState(targetRow, stdCountEl, limitCountEl) {
+                    var progressText = stdCountEl && stdCountEl.closest
+                        ? stdCountEl.closest('.progress-text')
+                        : null;
+                    var progressBar = targetRow.querySelector('.std-count-progress');
+
+                    // 当前教务页的表格会先输出 0/上限，异步人数接口成功后才给
+                    // progress-text 添加 text-primary 或 text-danger。只有这一套
+                    // 明确的异步结构存在时才要求状态标记，以兼容旧版页面。
+                    var usesAsyncPlaceholder = !!progressText && !!progressBar &&
+                        stdCountEl.classList.contains('std-count') &&
+                        limitCountEl.classList.contains('limit-count');
+                    if (!usesAsyncPlaceholder) return true;
+
+                    return progressText.classList.contains('text-primary') ||
+                        progressText.classList.contains('text-danger') ||
+                        progressText.classList.contains('text-success') ||
+                        progressText.classList.contains('text-warning');
+                }
                 
                 function tryReadVacancy() {
                     // TODO: 根据实际页面 DOM 结构更新选择器
@@ -623,9 +673,9 @@ object CourseCheckScriptUtils {
                     var limitCountEl = targetRow.querySelector('.limit-count, [data-limit-count], .capacity');
                     
                     // 读取课程名和教师
-                    var courseNameEl = targetRow.querySelector('.course-name, [data-course-name]');
+                    var courseNameEl = targetRow.querySelector('.course-name, .course-name-main, [data-course-name]');
                     var courseName = courseNameEl ? (courseNameEl.innerText || '').trim() : "未命名课程";
-                    var teacherEl = targetRow.querySelector('.teacher, [data-teacher]');
+                    var teacherEl = targetRow.querySelector('.teacher, .teacher-name, .teacher-cell, [data-teacher]');
                     var teacher = teacherEl ? (teacherEl.innerText || '').trim() : "未知";
                     
                     // 检测是否有"选课"按钮（区分已选课程和未选课程）
@@ -705,17 +755,32 @@ object CourseCheckScriptUtils {
                     if (!teacher) teacher = "未知";
                     
                     if (stdCountEl && limitCountEl) {
-                        var stdCount = parseInt(stdCountEl.innerText.trim()) || 0;
-                        var limitCount = parseInt(limitCountEl.innerText.trim()) || 0;
-                        console.log("Vacancy data: " + stdCount + "/" + limitCount + " name: " + courseName + " teacher: " + teacher + " hasSelectButton: " + hasSelectButton + " isAlreadySelected: " + isAlreadySelected);
-                        try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount, courseName, teacher, hasSelectButton, isAlreadySelected); } catch(e) {}
-                        return true;
+                        if (!hasLoadedCountState(targetRow, stdCountEl, limitCountEl)) {
+                            if (attempts === 0 || attempts % 5 === 0) {
+                                var progressText = stdCountEl.closest ? stdCountEl.closest('.progress-text') : null;
+                                var stateClasses = progressText ? progressText.className : '';
+                                var pendingMessage = "Waiting for async std-count: raw=" +
+                                    (stdCountEl.textContent || '') + "/" + (limitCountEl.textContent || '') +
+                                    ", stateClasses=" + stateClasses + ", attempt=" + attempts;
+                                console.log(pendingMessage);
+                                try { AndroidBridge.logDomInfo(pendingMessage); } catch(e) {}
+                            }
+                            return false;
+                        }
+
+                        var stdCount = readCount(stdCountEl);
+                        var limitCount = readCount(limitCountEl);
+                        if (stdCount !== null && limitCount !== null) {
+                            console.log("Vacancy data: " + stdCount + "/" + limitCount + " name: " + courseName + " teacher: " + teacher + " hasSelectButton: " + hasSelectButton + " isAlreadySelected: " + isAlreadySelected);
+                            try { AndroidBridge.onVacancyResult("$safeCode", stdCount, limitCount, courseName, teacher, hasSelectButton, isAlreadySelected); } catch(e) {}
+                            return true;
+                        }
                     }
                     
                     // 备选方案：尝试从"已选/上限"格式的文本中解析
                     var cells = targetRow.querySelectorAll('td, .cell, span');
                     for (var j = 0; j < cells.length; j++) {
-                        var cellText = (cells[j].innerText || '').trim();
+                        var cellText = (cells[j].textContent || cells[j].innerText || '').trim();
                         var match = cellText.match(/(\d+)\s*\/\s*(\d+)/);
                         if (match) {
                             var stdCount = parseInt(match[1]);
