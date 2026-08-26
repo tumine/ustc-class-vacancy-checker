@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.ustc.vacancychecker.data.model.TrackedCourse
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -33,6 +34,7 @@ class CourseRepository @Inject constructor(
         private val TRACKED_COURSES_KEY = stringPreferencesKey("tracked_courses")
         private val MONITORING_INTERVAL_KEY = intPreferencesKey("monitoring_interval")
         private val AUTO_SELECT_ENABLED_KEY = booleanPreferencesKey("auto_select_enabled")
+        private val VERIFICATION_CODE_METHOD_KEY = stringPreferencesKey("verification_code_method")
     }
 
     val trackedCoursesFlow: Flow<List<TrackedCourse>> = context.dataStore.data.map { preferences ->
@@ -47,6 +49,14 @@ class CourseRepository @Inject constructor(
         preferences[AUTO_SELECT_ENABLED_KEY] ?: false
     }.distinctUntilChanged()
 
+    val verificationCodeMethodFlow: Flow<VerificationCodeMethod> = context.dataStore.data.map { preferences ->
+        preferences[VERIFICATION_CODE_METHOD_KEY]
+            ?.let { storedValue ->
+                runCatching { VerificationCodeMethod.valueOf(storedValue) }.getOrNull()
+            }
+            ?: VerificationCodeMethod.SMS
+    }.distinctUntilChanged()
+
     suspend fun updateMonitoringInterval(intervalMinutes: Int) {
         context.dataStore.edit { preferences ->
             preferences[MONITORING_INTERVAL_KEY] = intervalMinutes
@@ -56,6 +66,12 @@ class CourseRepository @Inject constructor(
     suspend fun updateAutoSelectEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[AUTO_SELECT_ENABLED_KEY] = enabled
+        }
+    }
+
+    suspend fun updateVerificationCodeMethod(method: VerificationCodeMethod) {
+        context.dataStore.edit { preferences ->
+            preferences[VERIFICATION_CODE_METHOD_KEY] = method.name
         }
     }
     

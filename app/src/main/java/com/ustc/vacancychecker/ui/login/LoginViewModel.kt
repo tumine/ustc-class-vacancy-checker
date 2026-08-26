@@ -9,8 +9,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -22,6 +26,13 @@ class LoginViewModel @Inject constructor(
     
     var uiState by mutableStateOf(LoginUiState())
         private set
+
+    val verificationCodeMethod: StateFlow<VerificationCodeMethod> =
+        courseRepository.verificationCodeMethodFlow.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = VerificationCodeMethod.SMS
+        )
     
     init {
         checkHasCredentials()

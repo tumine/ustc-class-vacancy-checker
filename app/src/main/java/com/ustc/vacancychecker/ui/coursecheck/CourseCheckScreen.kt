@@ -58,6 +58,7 @@ fun CourseCheckScreen(
             classCode = uiState.classCode,
             credentials = viewModel.getCredentials(),
             autoSelectEnabled = uiState.autoSelectEnabled,
+            verificationCodeMethod = uiState.verificationCodeMethod,
             onNotInSelectTime = { viewModel.onNotInSelectTime() },
             onCourseNotFound = { viewModel.onCourseNotFound() },
             onVacancyResult = { stdCount, limitCount, courseName, teacher, hasSelectButton, isAlreadySelected ->
