@@ -2,6 +2,7 @@ package com.ustc.vacancychecker.data.remote
 
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -17,7 +18,7 @@ class SecondFactorWebViewTest {
     fun selectsSmsTabThenRequestsCodeOnce_inAndroidWebView() {
         verifyPage(
             header = "二次身份验证",
-            smsTab = "短信验证码",
+            verificationTab = "短信验证码",
             requestCode = "获取验证码"
         )
     }
@@ -26,12 +27,27 @@ class SecondFactorWebViewTest {
     fun selectsSmsTabThenRequestsCodeOnce_onEnglishPage() {
         verifyPage(
             header = "2-Factor Authentication",
-            smsTab = "SMS",
+            verificationTab = "SMS",
             requestCode = "Obtain Verification Code"
         )
     }
 
-    private fun verifyPage(header: String, smsTab: String, requestCode: String) {
+    @Test
+    fun selectsEmailTabThenRequestsCodeOnce_onEnglishPage() {
+        verifyPage(
+            header = "2-Factor Authentication",
+            verificationTab = "Email",
+            requestCode = "Obtain Verification Code",
+            method = VerificationCodeMethod.EMAIL
+        )
+    }
+
+    private fun verifyPage(
+        header: String,
+        verificationTab: String,
+        requestCode: String,
+        method: VerificationCodeMethod = VerificationCodeMethod.SMS
+    ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val pageLoaded = CountDownLatch(1)
         var webView: WebView? = null
@@ -41,7 +57,7 @@ class SecondFactorWebViewTest {
                 settings.javaScriptEnabled = true
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String?) {
-                        view.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
+                        view.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(method), null)
                         pageLoaded.countDown()
                     }
                 }
@@ -50,8 +66,8 @@ class SecondFactorWebViewTest {
                     """
                         <html><body>
                           <h1>$header</h1>
-                          <div role="tab" id="sms" onclick="
-                            window.smsClicks = (window.smsClicks || 0) + 1;
+                          <div role="tab" id="verification-tab" onclick="
+                            window.tabClicks = (window.tabClicks || 0) + 1;
                             if (!document.getElementById('request')) {
                               var suffix = document.createElement('span');
                               suffix.className = 'ant-input-suffix';
@@ -69,7 +85,7 @@ class SecondFactorWebViewTest {
                               suffix.appendChild(decorator);
                               document.body.appendChild(suffix);
                             }
-                          ">$smsTab</div>
+                          ">$verificationTab</div>
                         </body></html>
                     """.trimIndent(),
                     "text/html",
@@ -100,7 +116,7 @@ class SecondFactorWebViewTest {
         var result: String? = null
         instrumentation.runOnMainSync {
             webView?.evaluateJavascript(
-                "JSON.stringify([window.smsClicks || 0, window.requestClicks || 0])"
+                "JSON.stringify([window.tabClicks || 0, window.requestClicks || 0])"
             ) {
                 result = it?.trim('"')?.replace("\\\"", "\"")
                 resultReady.countDown()

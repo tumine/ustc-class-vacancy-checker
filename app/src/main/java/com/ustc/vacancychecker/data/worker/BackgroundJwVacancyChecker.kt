@@ -7,10 +7,12 @@ import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
+import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
@@ -19,7 +21,8 @@ import kotlin.coroutines.resume
 
 @Singleton
 class BackgroundJwVacancyChecker @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val courseRepository: CourseRepository
 ) {
     companion object {
         private const val TAG = "BgJwChecker"
@@ -45,6 +48,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
         }
 
         return try {
+            val verificationCodeMethod = courseRepository.verificationCodeMethodFlow.first()
             withTimeout(TIMEOUT_MS) {
                 suspendCancellableCoroutine { continuation ->
                     val mainHandler = Handler(Looper.getMainLooper())
@@ -325,7 +329,10 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                         if (url != null) {
                                             if (url.contains("id.ustc.edu.cn") || url.contains("passport.ustc.edu.cn")) {
                                                 view?.evaluateJavascript(LoginScriptUtils.getCredentialCaptureScript(), null)
-                                                view?.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
+                                                view?.evaluateJavascript(
+                                                    LoginScriptUtils.getSecondFactorAutoRequestScript(verificationCodeMethod),
+                                                    null
+                                                )
                                                 view?.evaluateJavascript(LoginScriptUtils.getAutoFillScript(username, password), null)
                                             }
                                             else if (url.contains("jw.ustc.edu.cn") && url.contains("login")) {

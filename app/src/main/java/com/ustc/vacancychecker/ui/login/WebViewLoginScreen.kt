@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 
 /**
@@ -28,7 +29,8 @@ fun WebViewLoginScreen(
     onLoginSuccess: (username: String, password: String) -> Unit,
     onLoginCancel: () -> Unit,
     onLoginError: () -> Unit = {},
-    credentials: Pair<String, String>? = null
+    credentials: Pair<String, String>? = null,
+    verificationCodeMethod: VerificationCodeMethod = VerificationCodeMethod.SMS
 ) {
     val loginUrl = "https://jw.ustc.edu.cn/for-std/course-select"
     val successUrlPattern = "jw.ustc.edu.cn"
@@ -152,7 +154,7 @@ fun WebViewLoginScreen(
                                 // Case 1: On USTC CAS Login Page (Angular SPA)
                                 if (it.contains("id.ustc.edu.cn") || it.contains("passport.ustc.edu.cn")) {
                                     injectCredentialCaptureScript(view)
-                                    injectSecondFactorAutoRequestScript(view)
+                                    injectSecondFactorAutoRequestScript(view, verificationCodeMethod)
                                     // 如果有凭证，尝试自动填充
                                     credentials?.let { (u, p) ->
                                         injectAutoFillScript(view, u, p)
@@ -237,9 +239,15 @@ private fun injectAutoFillScript(webView: WebView?, u: String, p: String) {
     webView?.evaluateJavascript(js, null)
 }
 
-/** 注入二次身份验证短信验证码自动请求脚本。 */
-private fun injectSecondFactorAutoRequestScript(webView: WebView?) {
-    webView?.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
+/** 注入二次身份验证验证码自动请求脚本。 */
+private fun injectSecondFactorAutoRequestScript(
+    webView: WebView?,
+    verificationCodeMethod: VerificationCodeMethod
+) {
+    webView?.evaluateJavascript(
+        LoginScriptUtils.getSecondFactorAutoRequestScript(verificationCodeMethod),
+        null
+    )
 }
 
 /**

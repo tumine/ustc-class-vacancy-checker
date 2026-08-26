@@ -1,5 +1,7 @@
 package com.ustc.vacancychecker.data.remote
 
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
+
 /**
  * 登录脚本工具类
  * 存放用于 WebView 登录的 JavaScript 脚本
@@ -357,25 +359,43 @@ object LoginScriptUtils {
     }
 
     /**
-     * 监听统一身份认证的二次身份验证页面，选择短信验证并请求验证码。
+     * 监听统一身份认证的二次身份验证页面，选择指定验证方式并请求验证码。
      *
      * 统一认证站点是 SPA，提交账号密码后通常不会触发 WebView 的
      * onPageFinished，因此监听器必须和登录脚本一起提前注入。
      */
-    fun getSecondFactorAutoRequestScript(): String {
+    fun getSecondFactorAutoRequestScript(
+        verificationCodeMethod: VerificationCodeMethod = VerificationCodeMethod.SMS
+    ): String {
+        if (verificationCodeMethod == VerificationCodeMethod.DISABLED) {
+            return "(function() {})();"
+        }
+
+        val chineseTabText = when (verificationCodeMethod) {
+            VerificationCodeMethod.SMS -> "短信验证码"
+            VerificationCodeMethod.EMAIL -> "邮箱验证码"
+            VerificationCodeMethod.DISABLED -> ""
+        }
+        val englishTabText = when (verificationCodeMethod) {
+            VerificationCodeMethod.SMS -> "SMS"
+            VerificationCodeMethod.EMAIL -> "Email"
+            VerificationCodeMethod.DISABLED -> ""
+        }
+        val methodLogText = verificationCodeMethod.name
+
         return """
             (function() {
                 if (window._secondFactorAutoRequestInjected) return;
                 window._secondFactorAutoRequestInjected = true;
 
-                var smsTabClicked = false;
+                var verificationTabClicked = false;
                 var codeRequested = false;
                 var observer = null;
                 var pollId = null;
                 var pageDetectedAt = 0;
-                var smsTabClickedAt = 0;
+                var verificationTabClickedAt = 0;
                 var pageSettleDelayMs = 1500;
-                var smsPanelSettleDelayMs = 1000;
+                var verificationPanelSettleDelayMs = 1000;
 
                 function normalizedText(element) {
                     return ((element && (element.innerText || element.textContent)) || '')
@@ -439,10 +459,10 @@ object LoginScriptUtils {
                 function secondFactorTexts() {
                     var bodyText = normalizedText(document.body);
                     if (bodyText.indexOf('二次身份验证') !== -1) {
-                        return { smsTab: '短信验证码', requestCode: '获取验证码' };
+                        return { verificationTab: '$chineseTabText', requestCode: '获取验证码' };
                     }
                     if (bodyText.indexOf('2-Factor Authentication') !== -1) {
-                        return { smsTab: 'SMS', requestCode: 'Obtain Verification Code' };
+                        return { verificationTab: '$englishTabText', requestCode: 'Obtain Verification Code' };
                     }
                     return null;
                 }
@@ -467,18 +487,18 @@ object LoginScriptUtils {
                     if (document.readyState !== 'complete'
                             || now - pageDetectedAt < pageSettleDelayMs) return;
 
-                    if (!smsTabClicked) {
-                        var smsTab = findAction(texts.smsTab, false);
-                        if (!smsTab) return;
-                        smsTabClicked = true;
-                        smsTabClickedAt = Date.now();
-                        console.log('Second factor: selecting SMS verification');
-                        smsTab.click();
+                    if (!verificationTabClicked) {
+                        var verificationTab = findAction(texts.verificationTab, false);
+                        if (!verificationTab) return;
+                        verificationTabClicked = true;
+                        verificationTabClickedAt = Date.now();
+                        console.log('Second factor: selecting $methodLogText verification');
+                        verificationTab.click();
                         return;
                     }
 
-                    // 等待 SMS 标签对应的验证码输入区和按钮完成动态渲染及事件绑定。
-                    if (now - smsTabClickedAt < smsPanelSettleDelayMs) return;
+                    // 等待所选标签对应的验证码输入区和按钮完成动态渲染及事件绑定。
+                    if (now - verificationTabClickedAt < verificationPanelSettleDelayMs) return;
 
                     var requestButton = findAction(texts.requestCode, true);
                     if (!requestButton) return;

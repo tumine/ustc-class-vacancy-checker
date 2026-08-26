@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ustc.vacancychecker.data.remote.DownloadState
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import com.ustc.vacancychecker.ui.login.LoginViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +38,7 @@ fun SettingsScreen(
     var showLogoutDialog by remember { mutableStateOf(false) }
     val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
     val autoSelectEnabled by settingsViewModel.autoSelectEnabled.collectAsState()
+    val verificationCodeMethod by settingsViewModel.verificationCodeMethod.collectAsState()
     val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
         listOf(1, 5, 10, 15, 30, 60, 120, 240)
     } else {
@@ -172,6 +174,46 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
             )
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(text = "二次验证方式", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = "登录二次验证时的验证码接收方式，自动获取选定验证途径的验证码",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                    )
+                    VerificationCodeMethod.entries.forEach { method ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    settingsViewModel.updateVerificationCodeMethod(method)
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = verificationCodeMethod == method,
+                                onClick = {
+                                    settingsViewModel.updateVerificationCodeMethod(method)
+                                }
+                            )
+                            Text(
+                                text = when (method) {
+                                    VerificationCodeMethod.SMS -> "手机验证码"
+                                    VerificationCodeMethod.EMAIL -> "邮件验证码"
+                                    VerificationCodeMethod.DISABLED -> "关闭（不自动获取验证码）"
+                                },
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // 登出按钮
             Card(

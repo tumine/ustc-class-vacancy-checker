@@ -22,6 +22,7 @@ fun LoginScreen(
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val uiState = viewModel.uiState
+    val verificationCodeMethod by viewModel.verificationCodeMethod.collectAsState()
     var showCredentialInput by remember { mutableStateOf(false) }
     var showWebViewLogin by remember { mutableStateOf(false) }
     
@@ -47,7 +48,8 @@ fun LoginScreen(
                 showWebViewLogin = false
                 showCredentialInput = true
             },
-            credentials = remember { viewModel.getCredentials() }
+            credentials = remember { viewModel.getCredentials() },
+            verificationCodeMethod = verificationCodeMethod
         )
     } else {
         // 主登录界面

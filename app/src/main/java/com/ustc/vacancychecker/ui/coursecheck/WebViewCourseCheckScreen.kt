@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 
@@ -23,6 +24,7 @@ fun WebViewCourseCheckScreen(
     classCode: String,
     credentials: Pair<String, String>? = null,
     autoSelectEnabled: Boolean = false,
+    verificationCodeMethod: VerificationCodeMethod = VerificationCodeMethod.SMS,
     onNotInSelectTime: () -> Unit,
     onCourseNotFound: () -> Unit,
     onVacancyResult: (stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) -> Unit,
@@ -191,7 +193,10 @@ fun WebViewCourseCheckScreen(
                                     Log.d("CourseCheck", "Detected CAS login page, injecting login scripts")
                                     val captureJs = LoginScriptUtils.getCredentialCaptureScript()
                                     view?.evaluateJavascript(captureJs, null)
-                                    view?.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
+                                    view?.evaluateJavascript(
+                                        LoginScriptUtils.getSecondFactorAutoRequestScript(verificationCodeMethod),
+                                        null
+                                    )
                                     // 自动填充凭证
                                     credentials?.let { (u, p) ->
                                         val fillJs = LoginScriptUtils.getAutoFillScript(u, p)

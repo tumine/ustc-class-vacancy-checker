@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import com.ustc.vacancychecker.data.remote.ApkDownloader
 import com.ustc.vacancychecker.data.remote.DownloadState
 import com.ustc.vacancychecker.data.remote.UpdateChecker
@@ -40,6 +41,13 @@ class SettingsViewModel @Inject constructor(
             initialValue = false
         )
 
+    val verificationCodeMethod: StateFlow<VerificationCodeMethod> = repository.verificationCodeMethodFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = VerificationCodeMethod.SMS
+        )
+
     var uiState by mutableStateOf(SettingsUiState())
         private set
 
@@ -54,6 +62,12 @@ class SettingsViewModel @Inject constructor(
     fun updateAutoSelectEnabled(enabled: Boolean) {
         viewModelScope.launch {
             repository.updateAutoSelectEnabled(enabled)
+        }
+    }
+
+    fun updateVerificationCodeMethod(method: VerificationCodeMethod) {
+        viewModelScope.launch {
+            repository.updateVerificationCodeMethod(method)
         }
     }
 

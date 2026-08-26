@@ -10,6 +10,7 @@ import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
 import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.model.TrackedCourse
+import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -27,6 +28,11 @@ class CourseCheckViewModel @Inject constructor(
         viewModelScope.launch {
             courseRepository.autoSelectEnabledFlow.collect { enabled ->
                 uiState = uiState.copy(autoSelectEnabled = enabled)
+            }
+        }
+        viewModelScope.launch {
+            courseRepository.verificationCodeMethodFlow.collect { method ->
+                uiState = uiState.copy(verificationCodeMethod = method)
             }
         }
     }
@@ -202,6 +208,7 @@ data class CourseCheckUiState(
     val errorMessage: String? = null,
     val showSuccessMessage: String? = null,
     val autoSelectEnabled: Boolean = false,
+    val verificationCodeMethod: VerificationCodeMethod = VerificationCodeMethod.SMS,
     val isSelecting: Boolean = false,
     val selectResult: SelectResult? = null
 )
