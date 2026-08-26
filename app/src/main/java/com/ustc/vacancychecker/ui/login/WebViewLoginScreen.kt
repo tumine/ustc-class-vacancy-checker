@@ -152,6 +152,7 @@ fun WebViewLoginScreen(
                                 // Case 1: On USTC CAS Login Page (Angular SPA)
                                 if (it.contains("id.ustc.edu.cn") || it.contains("passport.ustc.edu.cn")) {
                                     injectCredentialCaptureScript(view)
+                                    injectSecondFactorAutoRequestScript(view)
                                     // 如果有凭证，尝试自动填充
                                     credentials?.let { (u, p) ->
                                         injectAutoFillScript(view, u, p)
@@ -234,6 +235,11 @@ private fun injectAutoFillScript(webView: WebView?, u: String, p: String) {
     if (u.isBlank() || p.isBlank()) return
     val js = LoginScriptUtils.getAutoFillScript(u, p)
     webView?.evaluateJavascript(js, null)
+}
+
+/** 注入二次身份验证短信验证码自动请求脚本。 */
+private fun injectSecondFactorAutoRequestScript(webView: WebView?) {
+    webView?.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
 }
 
 /**

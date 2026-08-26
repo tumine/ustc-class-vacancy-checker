@@ -325,6 +325,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                         if (url != null) {
                                             if (url.contains("id.ustc.edu.cn") || url.contains("passport.ustc.edu.cn")) {
                                                 view?.evaluateJavascript(LoginScriptUtils.getCredentialCaptureScript(), null)
+                                                view?.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
                                                 view?.evaluateJavascript(LoginScriptUtils.getAutoFillScript(username, password), null)
                                             }
                                             else if (url.contains("jw.ustc.edu.cn") && url.contains("login")) {

@@ -36,4 +36,30 @@ class LoginScriptUtilsTest {
         assertTrue(script.contains("usernameInput === passwordInput"))
         assertFalse(script.contains("document.querySelector('.passwordInput input')"))
     }
+
+    @Test
+    fun secondFactorScript_requiresPageMarkerAndRequestsSmsCodeOnlyOnce() {
+        val script = LoginScriptUtils.getSecondFactorAutoRequestScript()
+
+        assertTrue(script.contains("二次身份验证"))
+        assertTrue(script.contains("短信验证码"))
+        assertTrue(script.contains("获取验证码"))
+        assertTrue(script.contains("2-Factor Authentication"))
+        assertTrue(script.contains("smsTab: 'SMS'"))
+        assertTrue(script.contains("Obtain Verification Code"))
+        assertTrue(script.contains("if (codeRequested || !texts) return"))
+        assertTrue(script.contains("pageSettleDelayMs = 1500"))
+        assertTrue(script.contains("smsPanelSettleDelayMs = 1000"))
+        assertTrue(script.contains("document.readyState !== 'complete'"))
+        assertTrue(script.contains("now - pageDetectedAt < pageSettleDelayMs"))
+        assertTrue(script.contains("now - smsTabClickedAt < smsPanelSettleDelayMs"))
+        assertTrue(script.contains("document.querySelectorAll(actionableSelector)"))
+        assertTrue(script.contains("element.querySelectorAll(actionableSelector)"))
+        assertTrue(script.contains("if (candidateText === text) return candidates[i]"))
+        assertTrue(script.contains("codeRequested = true"))
+        assertTrue(script.contains("requestButton.click()"))
+        assertTrue(script.contains("codeRequested = false"))
+        assertTrue(script.contains("verification code click dispatched to"))
+        assertTrue(script.contains("new MutationObserver(tryRequestCode)"))
+    }
 }

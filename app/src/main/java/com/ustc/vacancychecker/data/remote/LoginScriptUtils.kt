@@ -357,6 +357,155 @@ object LoginScriptUtils {
     }
 
     /**
+     * 监听统一身份认证的二次身份验证页面，选择短信验证并请求验证码。
+     *
+     * 统一认证站点是 SPA，提交账号密码后通常不会触发 WebView 的
+     * onPageFinished，因此监听器必须和登录脚本一起提前注入。
+     */
+    fun getSecondFactorAutoRequestScript(): String {
+        return """
+            (function() {
+                if (window._secondFactorAutoRequestInjected) return;
+                window._secondFactorAutoRequestInjected = true;
+
+                var smsTabClicked = false;
+                var codeRequested = false;
+                var observer = null;
+                var pollId = null;
+                var pageDetectedAt = 0;
+                var smsTabClickedAt = 0;
+                var pageSettleDelayMs = 1500;
+                var smsPanelSettleDelayMs = 1000;
+
+                function normalizedText(element) {
+                    return ((element && (element.innerText || element.textContent)) || '')
+                        .replace(/\s+/g, ' ').trim();
+                }
+
+                function isAvailable(element) {
+                    if (!element || element.disabled || element.getAttribute('aria-disabled') === 'true') {
+                        return false;
+                    }
+                    var style = window.getComputedStyle(element);
+                    return style.display !== 'none' && style.visibility !== 'hidden'
+                        && element.getClientRects().length > 0;
+                }
+
+                var actionableSelector =
+                    'button, a, [role="button"], [role="tab"], label, '
+                    + '.ant-tabs-tab, .ant-radio-button-wrapper, .ant-radio-wrapper';
+
+                function actionFor(element) {
+                    var actionableAncestor = element.closest(actionableSelector);
+                    if (actionableAncestor && isAvailable(actionableAncestor)) {
+                        return actionableAncestor;
+                    }
+
+                    // 统一认证的验证码按钮结构是 span -> span -> a。
+                    // 文字容器本身没有点击处理器，必须向内找到真正绑定事件的元素。
+                    var actionableDescendants = element.querySelectorAll(actionableSelector);
+                    for (var i = 0; i < actionableDescendants.length; i++) {
+                        if (isAvailable(actionableDescendants[i])) return actionableDescendants[i];
+                    }
+                    return null;
+                }
+
+                function findAction(text, allowContains) {
+                    // 第一轮只搜索真正可交互的元素，避免父级 span 抢先匹配文字。
+                    var candidates = document.querySelectorAll(actionableSelector);
+                    var containsMatch = null;
+                    for (var i = 0; i < candidates.length; i++) {
+                        var candidateText = normalizedText(candidates[i]);
+                        if (!isAvailable(candidates[i])) continue;
+                        if (candidateText === text) return candidates[i];
+                        if (!containsMatch && allowContains && candidateText.indexOf(text) !== -1) {
+                            containsMatch = candidates[i];
+                        }
+                    }
+                    if (containsMatch) return containsMatch;
+
+                    // 兼容只有普通文字容器可识别的页面结构，再由容器向内/向外解析动作元素。
+                    var textContainers = document.querySelectorAll('span, div');
+                    for (var j = 0; j < textContainers.length; j++) {
+                        var containerText = normalizedText(textContainers[j]);
+                        if (containerText !== text
+                                && (!allowContains || containerText.indexOf(text) === -1)) continue;
+                        var action = actionFor(textContainers[j]);
+                        if (action) return action;
+                    }
+                    return null;
+                }
+
+                function secondFactorTexts() {
+                    var bodyText = normalizedText(document.body);
+                    if (bodyText.indexOf('二次身份验证') !== -1) {
+                        return { smsTab: '短信验证码', requestCode: '获取验证码' };
+                    }
+                    if (bodyText.indexOf('2-Factor Authentication') !== -1) {
+                        return { smsTab: 'SMS', requestCode: 'Obtain Verification Code' };
+                    }
+                    return null;
+                }
+
+                function stopWatching() {
+                    if (observer) observer.disconnect();
+                    if (pollId) clearInterval(pollId);
+                }
+
+                function tryRequestCode() {
+                    var texts = secondFactorTexts();
+                    if (codeRequested || !texts) return;
+
+                    var now = Date.now();
+                    if (!pageDetectedAt) {
+                        pageDetectedAt = now;
+                        console.log('Second factor: page detected, waiting for it to settle');
+                        return;
+                    }
+
+                    // onPageFinished 不能代表 Angular SPA 的二次验证组件已经渲染完毕。
+                    if (document.readyState !== 'complete'
+                            || now - pageDetectedAt < pageSettleDelayMs) return;
+
+                    if (!smsTabClicked) {
+                        var smsTab = findAction(texts.smsTab, false);
+                        if (!smsTab) return;
+                        smsTabClicked = true;
+                        smsTabClickedAt = Date.now();
+                        console.log('Second factor: selecting SMS verification');
+                        smsTab.click();
+                        return;
+                    }
+
+                    // 等待 SMS 标签对应的验证码输入区和按钮完成动态渲染及事件绑定。
+                    if (now - smsTabClickedAt < smsPanelSettleDelayMs) return;
+
+                    var requestButton = findAction(texts.requestCode, true);
+                    if (!requestButton) return;
+                    // 先置位，避免框架处理点击造成的同步 DOM 变更触发重复请求。
+                    codeRequested = true;
+                    try {
+                        requestButton.click();
+                        console.log('Second factor: verification code click dispatched to '
+                            + requestButton.tagName);
+                        stopWatching();
+                    } catch (error) {
+                        codeRequested = false;
+                        console.warn('Second factor: verification code click failed');
+                    }
+                }
+
+                observer = new MutationObserver(tryRequestCode);
+                observer.observe(document.body || document.documentElement, {
+                    childList: true, subtree: true, characterData: true, attributes: true
+                });
+                pollId = setInterval(tryRequestCode, 500);
+                tryRequestCode();
+            })();
+        """.trimIndent()
+    }
+
+    /**
      * 注入脚本点击"统一身份认证登录"按钮
      */
     fun getAutoLoginClickScript(): String {

@@ -191,6 +191,7 @@ fun WebViewCourseCheckScreen(
                                     Log.d("CourseCheck", "Detected CAS login page, injecting login scripts")
                                     val captureJs = LoginScriptUtils.getCredentialCaptureScript()
                                     view?.evaluateJavascript(captureJs, null)
+                                    view?.evaluateJavascript(LoginScriptUtils.getSecondFactorAutoRequestScript(), null)
                                     // 自动填充凭证
                                     credentials?.let { (u, p) ->
                                         val fillJs = LoginScriptUtils.getAutoFillScript(u, p)
