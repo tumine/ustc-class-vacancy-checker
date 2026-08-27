@@ -1,5 +1,8 @@
 package com.ustc.vacancychecker.ui.tracker
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,16 +14,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
 import com.ustc.vacancychecker.data.model.TrackedCourse
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,6 +36,7 @@ fun TrackerScreen(
     viewModel: TrackerViewModel = hiltViewModel()
 ) {
     val courses by viewModel.trackedCourses.collectAsState()
+    val isReconcilingGroups by viewModel.isReconcilingGroups.collectAsState()
     val groups = remember(courses) {
         courses.groupBy { it.trackingGroupId }.values.map { group ->
             group.sortedWith(compareBy<TrackedCourse> { it.priority ?: courses.indexOf(it) })
@@ -64,7 +72,15 @@ fun TrackerScreen(
     ) { padding ->
         if (courses.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("当前没有正在跟踪的课程", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (isReconcilingGroups) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text("正在检测历史课堂分组…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    Text("当前没有正在跟踪的课程", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         } else {
             LazyColumn(
@@ -72,6 +88,19 @@ fun TrackerScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(vertical = 12.dp)
             ) {
+                if (isReconcilingGroups) {
+                    item(key = "legacy-group-reconciliation") {
+                        Column(Modifier.fillMaxWidth()) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "正在识别并合并历史备选课堂…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 items(groups, key = { it.first().trackingGroupId }) { group ->
                     CourseGroupCard(
                         courses = group,
@@ -166,21 +195,19 @@ private fun CourseGroupCard(
                     Spacer(Modifier.height(8.dp))
                 }
                 courses.forEach { course ->
-                    TrackedLineItem(
-                        course = course,
-                        groupEnabled = first.isGroupMonitoringEnabled,
-                        onToggle = { onToggleCourse(course, it) },
-                        onAutoSelectToggle = { onAutoSelectToggle(course, it) },
-                        onClearMessage = { onClearMessage(course) },
-                        onDelete = { onDeleteCourse(course) },
-                        dragHandle = if (courses.size > 1) {{
-                            ReorderHandle(
-                                groupId = course.trackingGroupId,
-                                courseId = course.courseId,
-                                onMove = { onMoveCourse(course, it) }
-                            )
-                        }} else null
-                    )
+                    key(course.courseId) {
+                        DraggableTrackedLineItem(
+                            course = course,
+                            index = courses.indexOf(course),
+                            groupSize = courses.size,
+                            groupEnabled = first.isGroupMonitoringEnabled,
+                            onToggle = { onToggleCourse(course, it) },
+                            onAutoSelectToggle = { onAutoSelectToggle(course, it) },
+                            onClearMessage = { onClearMessage(course) },
+                            onDelete = { onDeleteCourse(course) },
+                            onMove = { onMoveCourse(course, it) }
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
                 TextButton(onClick = onDeleteGroup, modifier = Modifier.align(Alignment.End)) {
@@ -235,23 +262,124 @@ private fun SelectedCourseBehavior.title(): String = when (this) {
 }
 
 @Composable
-private fun ReorderHandle(groupId: String, courseId: String, onMove: (Int) -> Unit) {
-    val threshold = with(LocalDensity.current) { 48.dp.toPx() }
-    var dragged by remember(groupId, courseId) { mutableFloatStateOf(0f) }
+private fun DraggableTrackedLineItem(
+    course: TrackedCourse,
+    index: Int,
+    groupSize: Int,
+    groupEnabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onAutoSelectToggle: (Boolean) -> Unit,
+    onClearMessage: () -> Unit,
+    onDelete: () -> Unit,
+    onMove: (Int) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
+    val placementOffset = remember(course.courseId) { Animatable(0f) }
+    val settlingOffset = remember(course.courseId) { Animatable(0f) }
+    var cardHeight by remember(course.courseId) { mutableIntStateOf(0) }
+    var previousIndex by remember(course.courseId) { mutableIntStateOf(index) }
+    var dragOffset by remember(course.courseId) { mutableFloatStateOf(0f) }
+    var dragDistanceSinceMove by remember(course.courseId) { mutableFloatStateOf(0f) }
+    var isDragging by remember(course.courseId) { mutableStateOf(false) }
+    var movePending by remember(course.courseId) { mutableStateOf(false) }
+
+    LaunchedEffect(index, cardHeight) {
+        if (index == previousIndex || cardHeight == 0) return@LaunchedEffect
+        val distance = cardHeight + spacingPx
+        val layoutDelta = (previousIndex - index) * distance
+        previousIndex = index
+        movePending = false
+        if (isDragging) {
+            dragOffset += layoutDelta
+        } else {
+            placementOffset.snapTo(layoutDelta)
+            placementOffset.animateTo(
+                0f,
+                spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy)
+            )
+        }
+    }
+
+    val visualOffset = if (isDragging) dragOffset else settlingOffset.value
+    TrackedLineItem(
+        course = course,
+        groupEnabled = groupEnabled,
+        onToggle = onToggle,
+        onAutoSelectToggle = onAutoSelectToggle,
+        onClearMessage = onClearMessage,
+        onDelete = onDelete,
+        modifier = Modifier
+            .zIndex(if (isDragging || settlingOffset.isRunning) 1f else 0f)
+            .graphicsLayer {
+                translationY = visualOffset + placementOffset.value
+                scaleX = if (isDragging) 1.02f else 1f
+                scaleY = if (isDragging) 1.02f else 1f
+                shadowElevation = if (isDragging) 18.dp.toPx() else 0f
+                alpha = if (isDragging) 0.96f else 1f
+            }
+            .onSizeChanged { cardHeight = it.height },
+        dragHandle = if (groupSize > 1) {{
+            ReorderHandle(
+                groupId = course.trackingGroupId,
+                courseId = course.courseId,
+                onDragStart = {
+                    scope.launch { settlingOffset.stop() }
+                    isDragging = true
+                    dragDistanceSinceMove = 0f
+                },
+                onDrag = { delta ->
+                    dragOffset += delta
+                    dragDistanceSinceMove += delta
+                    val threshold = ((cardHeight + spacingPx) * 0.45f).coerceAtLeast(spacingPx * 2)
+                    val direction = when {
+                        dragDistanceSinceMove > threshold && index < groupSize - 1 -> 1
+                        dragDistanceSinceMove < -threshold && index > 0 -> -1
+                        else -> 0
+                    }
+                    if (direction != 0 && !movePending) {
+                        movePending = true
+                        dragDistanceSinceMove -= direction * (cardHeight + spacingPx)
+                        onMove(direction)
+                    }
+                },
+                onDragEnd = {
+                    val releaseOffset = dragOffset
+                    dragOffset = 0f
+                    dragDistanceSinceMove = 0f
+                    isDragging = false
+                    scope.launch {
+                        settlingOffset.snapTo(releaseOffset)
+                        settlingOffset.animateTo(
+                            0f,
+                            spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy)
+                        )
+                    }
+                }
+            )
+        }} else null
+    )
+}
+
+@Composable
+private fun ReorderHandle(
+    groupId: String,
+    courseId: String,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit
+) {
     Icon(
         Icons.Default.DragHandle,
         contentDescription = "长按拖动调整优先级",
         modifier = Modifier.size(32.dp).pointerInput(groupId, courseId) {
             detectDragGesturesAfterLongPress(
-                onDragEnd = { dragged = 0f },
-                onDragCancel = { dragged = 0f },
+                onDragStart = { onDragStart() },
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragEnd,
                 onDrag = { change, amount ->
                     change.consume()
-                    dragged += amount.y
-                    when {
-                        dragged > threshold -> { onMove(1); dragged = 0f }
-                        dragged < -threshold -> { onMove(-1); dragged = 0f }
-                    }
+                    onDrag(amount.y)
                 }
             )
         },
@@ -267,10 +395,11 @@ fun TrackedLineItem(
     onAutoSelectToggle: (Boolean) -> Unit,
     onClearMessage: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
     dragHandle: (@Composable () -> Unit)? = null
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(Modifier.padding(16.dp)) {

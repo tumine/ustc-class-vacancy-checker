@@ -5,17 +5,25 @@ import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.TrackedCourse
 import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
+import com.ustc.vacancychecker.data.model.ResolvedCourseIdentity
+import com.ustc.vacancychecker.data.remote.CatalogCourseResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class TrackerViewModel @Inject constructor(
-    private val courseRepository: CourseRepository
+    private val courseRepository: CourseRepository,
+    private val catalogCourseResolver: CatalogCourseResolver
 ) : ViewModel() {
+
+    private val _isReconcilingGroups = MutableStateFlow(false)
+    val isReconcilingGroups: StateFlow<Boolean> = _isReconcilingGroups.asStateFlow()
 
     val trackedCourses: StateFlow<List<TrackedCourse>> = courseRepository.trackedCoursesFlow
         .stateIn(
@@ -23,6 +31,30 @@ class TrackerViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    init {
+        reconcileLegacyCourseGroups()
+    }
+
+    private fun reconcileLegacyCourseGroups() {
+        viewModelScope.launch {
+            _isReconcilingGroups.value = true
+            try {
+                val legacyCourses = courseRepository.getTrackedCourses().filter { it.courseKey == null }
+                if (legacyCourses.isEmpty()) return@launch
+                val resolved = catalogCourseResolver.resolve(legacyCourses.map { it.courseId })
+                courseRepository.mergeResolvedCourseGroups(
+                    resolved.mapValues { (_, metadata) ->
+                        ResolvedCourseIdentity(metadata.courseKey, metadata.courseNumber)
+                    }
+                )
+            } catch (error: Exception) {
+                android.util.Log.w("TrackerViewModel", "Failed to reconcile legacy course groups", error)
+            } finally {
+                _isReconcilingGroups.value = false
+            }
+        }
+    }
 
     fun removeCourse(courseId: String) {
         viewModelScope.launch {

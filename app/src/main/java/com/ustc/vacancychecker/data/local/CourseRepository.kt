@@ -10,6 +10,8 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.ustc.vacancychecker.data.model.TrackedCourse
 import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
+import com.ustc.vacancychecker.data.model.CourseGroupMerger
+import com.ustc.vacancychecker.data.model.ResolvedCourseIdentity
 import com.ustc.vacancychecker.data.model.VerificationCodeMethod
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -240,6 +242,22 @@ class CourseRepository @Inject constructor(
             )
             writeCourses(preferences, currentList)
         }
+    }
+
+    /** 打开追踪列表时一次性补齐历史记录并原子归组，避免 UI 出现半合并状态。 */
+    suspend fun mergeResolvedCourseGroups(
+        identities: Map<String, ResolvedCourseIdentity>
+    ): Int {
+        var mergedGroupCount = 0
+        context.dataStore.edit { preferences ->
+            val currentList = readCourses(preferences)
+            val result = CourseGroupMerger.merge(currentList, identities)
+            mergedGroupCount = result.mergedGroupCount
+            if (result.changed) {
+                writeCourses(preferences, result.courses)
+            }
+        }
+        return mergedGroupCount
     }
 
     suspend fun setGroupMonitoring(groupId: String, enabled: Boolean) {
