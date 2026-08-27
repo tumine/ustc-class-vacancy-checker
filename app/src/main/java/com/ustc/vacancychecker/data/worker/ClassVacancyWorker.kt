@@ -14,6 +14,7 @@ import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
 import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.model.CourseTrackingPlanner
+import com.ustc.vacancychecker.data.model.CourseSwitchState
 import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
 import com.ustc.vacancychecker.data.remote.CatalogCourseResolver
 import dagger.assisted.Assisted
@@ -97,6 +98,10 @@ class ClassVacancyWorker @AssistedInject constructor(
             if (result.isSuccess) {
                 val checkResults = result.getOrThrow()
                 val handledGroups = mutableSetOf<String>()
+                val handledSwitchGroups = mutableSetOf<String>()
+                val groupsWithSwitchResult = requests.mapNotNull { request ->
+                    request.groupId.takeIf { checkResults[request.courseId]?.switchResult != null }
+                }.toSet()
                 for (request in requests) {
                     val course = allCourses.firstOrNull { it.courseId == request.courseId } ?: continue
                     val data = checkResults[course.courseId]
@@ -112,6 +117,24 @@ class ClassVacancyWorker @AssistedInject constructor(
                             lastSelectMessage = selectResult?.message
                         )
 
+                        data.switchResult?.takeIf { handledSwitchGroups.add(request.groupId) }?.let { switchResult ->
+                            repository.updateGroupSwitchState(
+                                groupId = request.groupId,
+                                sourceCourseId = switchResult.sourceCourseId,
+                                targetCourseId = switchResult.targetCourseId,
+                                state = switchResult.state,
+                                message = switchResult.message,
+                                actionLog = switchResult.actionLog
+                            )
+                            sendSwitchNotification(
+                                state = switchResult.state,
+                                sourceCourseId = switchResult.sourceCourseId,
+                                targetCourseId = switchResult.targetCourseId,
+                                message = switchResult.message,
+                                actionLog = switchResult.actionLog
+                            )
+                        }
+
                         when {
                             selectResult?.success == true && !selectResult.isAlreadySelected -> {
                                 sendSelectSuccessNotification(course.courseId, course.courseName, selectResult.message)
@@ -126,8 +149,8 @@ class ClassVacancyWorker @AssistedInject constructor(
                                     isAlreadySelected = false
                                 )
                             }
-                            vacancy > 0 && !data.isAlreadySelected -> {
-                            sendVacancyNotification(course.courseId, course.courseName, vacancy)
+                            vacancy > 0 && !data.isAlreadySelected && request.groupId !in groupsWithSwitchResult -> {
+                                sendVacancyNotification(course.courseId, course.courseName, vacancy)
                             }
                         }
 
@@ -257,5 +280,49 @@ class ClassVacancyWorker @AssistedInject constructor(
             .build()
 
         notificationManager.notify("${courseId}_select_failed".hashCode(), notification)
+    }
+
+    private fun sendSwitchNotification(
+        state: CourseSwitchState,
+        sourceCourseId: String,
+        targetCourseId: String,
+        message: String,
+        actionLog: List<String>
+    ) {
+        val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val intent = android.content.Intent(appContext, com.ustc.vacancychecker.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            appContext,
+            0,
+            intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val title = when (state) {
+            CourseSwitchState.PENDING_VERIFICATION -> "换班申请已提交，待核验"
+            CourseSwitchState.VERIFIED -> "换班成功"
+            CourseSwitchState.FAILED -> "换班失败"
+        }
+        val details = buildString {
+            append("$sourceCourseId → $targetCourseId\n$message")
+            if (actionLog.isNotEmpty()) {
+                append("\n\n执行记录：\n")
+                append(actionLog.joinToString("\n"))
+            }
+        }
+        val notification = NotificationCompat.Builder(appContext, VacancyCheckerApp.CHANNEL_ID)
+            .setSmallIcon(
+                if (state == CourseSwitchState.FAILED) android.R.drawable.ic_dialog_alert
+                else android.R.drawable.ic_dialog_info
+            )
+            .setContentTitle(title)
+            .setContentText("$sourceCourseId → $targetCourseId：$message")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(details))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        notificationManager.notify("${sourceCourseId}_${targetCourseId}_switch".hashCode(), notification)
     }
 }

@@ -282,7 +282,7 @@ private fun GroupBehaviorSelector(
     }
     Text(
         when (behavior) {
-            SelectedCourseBehavior.PRIORITY_UPGRADE -> "仅继续检测更高优先级课堂；当前版本不会自动退课，换班状态机会单独接入。"
+            SelectedCourseBehavior.PRIORITY_UPGRADE -> "发现更高优先级课堂有空位后，将按页面按钮组合执行退课后选课，或提交单课换班申请。"
             SelectedCourseBehavior.DISABLE_GROUP -> "安全默认值：暂停本组，但保留课堂开关与顺序。"
             SelectedCourseBehavior.DELETE_GROUP -> "确认选中后删除本组全部跟踪条目。"
         },
@@ -476,6 +476,27 @@ fun TrackedLineItem(
                         Text(course.lastSelectMessage.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                         IconButton(onClick = onClearMessage, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Default.Close, "清除反馈", Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
+            if (!course.lastSwitchMessage.isNullOrEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                val switchFailed = course.switchState == com.ustc.vacancychecker.data.model.CourseSwitchState.FAILED
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (switchFailed) {
+                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                        }
+                    )
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text(course.lastSwitchMessage.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                        course.switchActionLog.orEmpty().forEach { step ->
+                            Text("• $step", style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }

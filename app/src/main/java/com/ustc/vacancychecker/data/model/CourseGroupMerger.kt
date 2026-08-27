@@ -52,6 +52,11 @@ object CourseGroupMerger {
             val template = previouslyGrouped.firstOrNull() ?: ordered.first()
             val settingsEnabled = template.isGroupMonitoringEnabled
             val settingsBehavior = template.effectiveSelectedCourseBehavior
+            val pendingSource = template.pendingSwitchSourceId
+            val pendingTarget = template.pendingSwitchTargetId
+            val switchState = template.switchState
+            val switchMessage = template.lastSwitchMessage
+            val switchLog = template.switchActionLog
 
             if (ordered.map { originalGroupIds.getValue(it.courseId) }.distinct().size > 1) {
                 mergedGroupCount++
@@ -61,7 +66,12 @@ object CourseGroupMerger {
                 updated[index] = updated[index].copy(
                     groupMonitoringEnabled = settingsEnabled,
                     selectedCourseBehavior = settingsBehavior,
-                    priority = priority
+                    priority = priority,
+                    pendingSwitchSourceId = pendingSource,
+                    pendingSwitchTargetId = pendingTarget,
+                    switchState = switchState,
+                    lastSwitchMessage = switchMessage,
+                    switchActionLog = switchLog
                 )
             }
         }

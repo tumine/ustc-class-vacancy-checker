@@ -21,7 +21,12 @@ data class TrackedCourse(
     @SerializedName("groupMonitoringEnabled") val groupMonitoringEnabled: Boolean? = null,
     @SerializedName("selectedCourseBehavior") val selectedCourseBehavior: SelectedCourseBehavior? = null,
     @SerializedName("priority") val priority: Int? = null,
-    @SerializedName("isAlreadySelected") val isAlreadySelected: Boolean? = null
+    @SerializedName("isAlreadySelected") val isAlreadySelected: Boolean? = null,
+    @SerializedName("pendingSwitchSourceId") val pendingSwitchSourceId: String? = null,
+    @SerializedName("pendingSwitchTargetId") val pendingSwitchTargetId: String? = null,
+    @SerializedName("switchState") val switchState: CourseSwitchState? = null,
+    @SerializedName("lastSwitchMessage") val lastSwitchMessage: String? = null,
+    @SerializedName("switchActionLog") val switchActionLog: List<String>? = null
 ) {
     val isGroupMonitoringEnabled: Boolean
         get() = groupMonitoringEnabled != false
@@ -38,7 +43,7 @@ data class TrackedCourse(
 }
 
 enum class SelectedCourseBehavior {
-    /** 仅继续关注优先级更高的课堂；自动换班实现完成前不会执行退课。 */
+    /** 继续关注优先级更高的课堂，并在发现空位后按页面按钮组合执行换班。 */
     PRIORITY_UPGRADE,
 
     /** 安全默认值：暂停当前课程组，保留课堂开关和顺序。 */
@@ -46,4 +51,10 @@ enum class SelectedCourseBehavior {
 
     /** 删除当前课程组内全部课堂。 */
     DELETE_GROUP
+}
+
+enum class CourseSwitchState {
+    PENDING_VERIFICATION,
+    VERIFIED,
+    FAILED
 }

@@ -20,7 +20,9 @@ object CourseTrackingPlanner {
                     groupId = course.trackingGroupId,
                     priority = course.priority ?: fallbackPriority,
                     autoSelectEnabled = course.autoSelectEnabled == true,
-                    selectedCourseBehavior = course.effectiveSelectedCourseBehavior
+                    selectedCourseBehavior = course.effectiveSelectedCourseBehavior,
+                    pendingSwitchSourceId = course.pendingSwitchSourceId,
+                    pendingSwitchTargetId = course.pendingSwitchTargetId
                 )
             }
     }

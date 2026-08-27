@@ -115,7 +115,12 @@ class CourseRepository @Inject constructor(
                         selectedCourseBehavior = old.selectedCourseBehavior
                             ?: groupTemplate(currentList, newCourse.courseKey)?.selectedCourseBehavior,
                         priority = old.priority ?: nextPriority(currentList, newCourse.courseKey),
-                        isAlreadySelected = old.isAlreadySelected
+                        isAlreadySelected = old.isAlreadySelected,
+                        pendingSwitchSourceId = old.pendingSwitchSourceId,
+                        pendingSwitchTargetId = old.pendingSwitchTargetId,
+                        switchState = old.switchState,
+                        lastSwitchMessage = old.lastSwitchMessage,
+                        switchActionLog = old.switchActionLog
                     )
                 } else {
                     val template = groupTemplate(currentList, newCourse.courseKey)
@@ -125,7 +130,12 @@ class CourseRepository @Inject constructor(
                             selectedCourseBehavior = template?.selectedCourseBehavior
                                 ?: SelectedCourseBehavior.DISABLE_GROUP,
                             priority = nextPriority(currentList, newCourse.courseKey),
-                            isAlreadySelected = newCourse.isAlreadySelected ?: false
+                            isAlreadySelected = newCourse.isAlreadySelected ?: false,
+                            pendingSwitchSourceId = template?.pendingSwitchSourceId,
+                            pendingSwitchTargetId = template?.pendingSwitchTargetId,
+                            switchState = template?.switchState,
+                            lastSwitchMessage = template?.lastSwitchMessage,
+                            switchActionLog = template?.switchActionLog
                         )
                     )
                 }
@@ -238,7 +248,12 @@ class CourseRepository @Inject constructor(
                     ?: SelectedCourseBehavior.DISABLE_GROUP,
                 priority = template?.let { nextPriority(currentList, courseKey) }
                     ?: item.priority
-                    ?: 0
+                    ?: 0,
+                pendingSwitchSourceId = template?.pendingSwitchSourceId ?: item.pendingSwitchSourceId,
+                pendingSwitchTargetId = template?.pendingSwitchTargetId ?: item.pendingSwitchTargetId,
+                switchState = template?.switchState ?: item.switchState,
+                lastSwitchMessage = template?.lastSwitchMessage ?: item.lastSwitchMessage,
+                switchActionLog = template?.switchActionLog ?: item.switchActionLog
             )
             writeCourses(preferences, currentList)
         }
@@ -266,6 +281,25 @@ class CourseRepository @Inject constructor(
 
     suspend fun setGroupBehavior(groupId: String, behavior: SelectedCourseBehavior) {
         updateGroup(groupId) { it.copy(selectedCourseBehavior = behavior) }
+    }
+
+    suspend fun updateGroupSwitchState(
+        groupId: String,
+        sourceCourseId: String?,
+        targetCourseId: String?,
+        state: com.ustc.vacancychecker.data.model.CourseSwitchState,
+        message: String,
+        actionLog: List<String>
+    ) {
+        updateGroup(groupId) { course ->
+            course.copy(
+                pendingSwitchSourceId = if (state == com.ustc.vacancychecker.data.model.CourseSwitchState.PENDING_VERIFICATION) sourceCourseId else null,
+                pendingSwitchTargetId = if (state == com.ustc.vacancychecker.data.model.CourseSwitchState.PENDING_VERIFICATION) targetCourseId else null,
+                switchState = state,
+                lastSwitchMessage = message,
+                switchActionLog = actionLog
+            )
+        }
     }
 
     suspend fun removeTrackedGroup(groupId: String) {

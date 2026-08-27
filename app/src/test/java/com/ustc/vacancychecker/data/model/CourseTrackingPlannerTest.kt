@@ -51,6 +51,20 @@ class CourseTrackingPlannerTest {
         assertTrue(CourseTrackingPlanner.shouldSkipAfterSelection(selected, request("A.03", "course:a", 3)))
     }
 
+    @Test
+    fun `pending adjustment verification ids are copied into check request`() {
+        val tracked = course("A.01", key = "catalog-course:42").copy(
+            pendingSwitchSourceId = "A.02",
+            pendingSwitchTargetId = "A.01",
+            switchState = CourseSwitchState.PENDING_VERIFICATION
+        )
+
+        val request = CourseTrackingPlanner.buildRequests(listOf(tracked)).single()
+
+        assertEquals("A.02", request.pendingSwitchSourceId)
+        assertEquals("A.01", request.pendingSwitchTargetId)
+    }
+
     private fun course(id: String, key: String? = null, priority: Int? = null) = TrackedCourse(
         courseId = id,
         courseName = "Test",
