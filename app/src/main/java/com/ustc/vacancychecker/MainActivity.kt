@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
                 courseRepository.monitoringIntervalFlow,
                 courseRepository.trackedCoursesFlow
             ) { interval, courses ->
-                interval > 0 && courses.any { it.isMonitoring }
+                interval > 0 && courses.any { it.isEffectivelyMonitoring }
             }
                 .distinctUntilChanged()
                 .collectLatest { shouldMonitor ->

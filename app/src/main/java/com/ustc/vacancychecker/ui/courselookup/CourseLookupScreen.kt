@@ -55,8 +55,12 @@ fun CourseLookupScreen(
             if (uiState.selectedForTracking.isNotEmpty()) {
                 ExtendedFloatingActionButton(
                     onClick = { viewModel.addToTracking() },
-                    icon = { Icon(Icons.Filled.Search, contentDescription = null) }, // or another icon
-                    text = { Text("加入跟踪 (${uiState.selectedForTracking.size})") }
+                    icon = {
+                        if (uiState.isResolvingTracking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Filled.Search, contentDescription = null)
+                    },
+                    text = { Text(if (uiState.isResolvingTracking) "正在确认课程..." else "加入跟踪 (${uiState.selectedForTracking.size})") },
+                    expanded = true
                 )
             }
         },
@@ -217,6 +221,20 @@ fun CourseLookupScreen(
                 }
             }
         }
+    }
+
+    uiState.trackingConflictMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelTrackingAdd() },
+            title = { Text("发现同课程备选课堂") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmTrackingAdd() }) { Text("加入课程组") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelTrackingAdd() }) { Text("取消") }
+            }
+        )
     }
 }
 

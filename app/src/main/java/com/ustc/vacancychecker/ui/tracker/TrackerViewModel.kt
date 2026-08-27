@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.TrackedCourse
+import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +45,30 @@ class TrackerViewModel @Inject constructor(
     fun clearSelectMessage(courseId: String) {
         viewModelScope.launch {
             courseRepository.clearSelectMessage(courseId)
+        }
+    }
+
+    fun toggleGroupMonitoring(groupId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            courseRepository.setGroupMonitoring(groupId, enabled)
+        }
+    }
+
+    fun setGroupBehavior(groupId: String, behavior: SelectedCourseBehavior) {
+        viewModelScope.launch {
+            courseRepository.setGroupBehavior(groupId, behavior)
+        }
+    }
+
+    fun removeGroup(groupId: String) {
+        viewModelScope.launch {
+            courseRepository.removeTrackedGroup(groupId)
+        }
+    }
+
+    fun moveCourse(groupId: String, courseId: String, direction: Int) {
+        viewModelScope.launch {
+            courseRepository.moveCourseWithinGroup(groupId, courseId, direction)
         }
     }
 

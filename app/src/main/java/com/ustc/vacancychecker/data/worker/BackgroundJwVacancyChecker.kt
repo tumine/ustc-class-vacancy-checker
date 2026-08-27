@@ -9,6 +9,9 @@ import android.view.ViewGroup
 import android.webkit.*
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.SelectResult
+import com.ustc.vacancychecker.data.model.CourseCheckRequest
+import com.ustc.vacancychecker.data.model.CourseCheckResult
+import com.ustc.vacancychecker.data.model.CourseTrackingPlanner
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -35,17 +38,18 @@ class BackgroundJwVacancyChecker @Inject constructor(
 
     @SuppressLint("SetJavaScriptEnabled")
     suspend fun performCheck(
-        classCodes: List<String>,
+        requests: List<CourseCheckRequest>,
         username: String,
-        password: String,
-        autoSelectMap: Map<String, Boolean> = emptyMap()
-    ): Result<Map<String, Pair<Int, SelectResult?>>> {
+        password: String
+    ): Result<Map<String, CourseCheckResult>> {
         if (username.isBlank() || password.isBlank()) {
             return Result.failure(Exception("用户名或密码为空"))
         }
-        if (classCodes.isEmpty()) {
+        if (requests.isEmpty()) {
             return Result.success(emptyMap())
         }
+
+        val classCodes = requests.map { it.courseId }
 
         return try {
             val verificationCodeMethod = courseRepository.verificationCodeMethodFlow.first()
@@ -56,7 +60,8 @@ class BackgroundJwVacancyChecker @Inject constructor(
                     
                     mainHandler.post {
                         var isResumed = false
-                        val resultMap = mutableMapOf<String, Pair<Int, SelectResult?>>()
+                        val resultMap = mutableMapOf<String, CourseCheckResult>()
+                        val skippedCourseIds = mutableSetOf<String>()
                         var currentCourseIndex = 0
                         var isSelectingCourse = false
                         var currentVacancy = 0
@@ -71,7 +76,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                         var searchRetryCount = mutableMapOf<String, Int>() // 每个课程的搜索重试次数
                         var isReloading = false // 是否正在重新加载页面
                         
-                        fun resumeEx(result: Result<Map<String, Pair<Int, SelectResult?>>>) {
+                        fun resumeEx(result: Result<Map<String, CourseCheckResult>>) {
                             if (!isResumed && continuation.isActive) {
                                 isResumed = true
                                 try {
@@ -108,7 +113,17 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             }, 2000)
                         }
 
+                        fun skipRemainingAfterSelection(selectedRequest: CourseCheckRequest) {
+                            requests.drop(currentCourseIndex + 1)
+                                .filter { CourseTrackingPlanner.shouldSkipAfterSelection(selectedRequest, it) }
+                                .forEach { skippedCourseIds.add(it.courseId) }
+                        }
+
                         fun checkNextCourse() {
+                            while (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] in skippedCourseIds) {
+                                Log.d(TAG, "Skipping ${classCodes[currentCourseIndex]} after same-group selection")
+                                currentCourseIndex++
+                            }
                             if (currentCourseIndex < classCodes.size) {
                                 val code = classCodes[currentCourseIndex]
                                 Log.d(TAG, "Checking course: $code")
@@ -248,7 +263,8 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 currentVacancy = maxOf(0, limitCount - stdCount)
                                                 
                                                 // 获取该课程的自动选课开关状态
-                                                val courseAutoSelectEnabled = autoSelectMap[code] ?: false
+                                                val currentRequest = requests[currentCourseIndex]
+                                                val courseAutoSelectEnabled = currentRequest.autoSelectEnabled
                                                 
                                                 // 如果启用自动选课，有空位，有选课按钮，且未选中，则触发选课
                                                 if (courseAutoSelectEnabled && currentVacancy > 0 && hasSelectButton && !isAlreadySelected) {
@@ -260,7 +276,13 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                     }, 1000)
                                                 } else {
                                                     // 否则直接记录结果并继续下一门课
-                                                    resultMap[code] = Pair(currentVacancy, null)
+                                                    resultMap[code] = CourseCheckResult(
+                                                        vacancy = currentVacancy,
+                                                        isAlreadySelected = isAlreadySelected
+                                                    )
+                                                    if (isAlreadySelected) {
+                                                        skipRemainingAfterSelection(currentRequest)
+                                                    }
                                                     currentCourseIndex++
                                                     checkNextCourse()
                                                 }
@@ -283,11 +305,19 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
                                                 if (code.isNotEmpty()) {
                                                     val isAlreadySelected = message.contains(MSG_ALREADY_SELECTED)
-                                                    resultMap[code] = Pair(currentVacancy, SelectResult(
+                                                    val selectResult = SelectResult(
                                                         success = isAlreadySelected,
                                                         message = message,
                                                         isAlreadySelected = isAlreadySelected
-                                                    ))
+                                                    )
+                                                    resultMap[code] = CourseCheckResult(
+                                                        vacancy = currentVacancy,
+                                                        isAlreadySelected = isAlreadySelected,
+                                                        selectResult = selectResult
+                                                    )
+                                                    if (isAlreadySelected) {
+                                                        skipRemainingAfterSelection(requests[currentCourseIndex])
+                                                    }
                                                     currentCourseIndex++
                                                     checkNextCourse()
                                                 }
@@ -301,7 +331,14 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                         mainHandler.post {
                                             val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
                                             if (code.isNotEmpty()) {
-                                                resultMap[code] = Pair(currentVacancy, SelectResult(success, message))
+                                                resultMap[code] = CourseCheckResult(
+                                                    vacancy = currentVacancy,
+                                                    isAlreadySelected = false,
+                                                    selectResult = SelectResult(success, message)
+                                                )
+                                                if (success) {
+                                                    skipRemainingAfterSelection(requests[currentCourseIndex])
+                                                }
                                                 currentCourseIndex++
                                                 checkNextCourse()
                                             }
