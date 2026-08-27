@@ -104,6 +104,12 @@ class TrackerViewModel @Inject constructor(
         }
     }
 
+    fun setCourseOrder(groupId: String, orderedCourseIds: List<String>) {
+        viewModelScope.launch {
+            courseRepository.setCourseOrder(groupId, orderedCourseIds)
+        }
+    }
+
     fun refreshAll(context: android.content.Context) {
         android.util.Log.d("TrackerViewModel", "refreshAll called")
         val workRequest = com.ustc.vacancychecker.data.worker.ClassVacancyWorker.buildImmediateOneTimeRequest()

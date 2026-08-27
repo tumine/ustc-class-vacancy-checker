@@ -24,6 +24,7 @@ import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
 import com.ustc.vacancychecker.data.model.TrackedCourse
+import com.ustc.vacancychecker.data.model.CourseOrderEditor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -111,8 +112,8 @@ fun TrackerScreen(
                         onAutoSelectToggle = { course, enabled -> viewModel.toggleAutoSelect(course.courseId, enabled) },
                         onClearMessage = { viewModel.clearSelectMessage(it.courseId) },
                         onDeleteCourse = { courseToDelete = it },
-                        onMoveCourse = { course, direction ->
-                            viewModel.moveCourse(course.trackingGroupId, course.courseId, direction)
+                        onPersistOrder = { groupId, orderedCourseIds ->
+                            viewModel.setCourseOrder(groupId, orderedCourseIds)
                         }
                     )
                 }
@@ -161,10 +162,27 @@ private fun CourseGroupCard(
     onAutoSelectToggle: (TrackedCourse, Boolean) -> Unit,
     onClearMessage: (TrackedCourse) -> Unit,
     onDeleteCourse: (TrackedCourse) -> Unit,
-    onMoveCourse: (TrackedCourse, Int) -> Unit
+    onPersistOrder: (String, List<String>) -> Unit
 ) {
     var expanded by remember(courses.first().trackingGroupId) { mutableStateOf(courses.size == 1) }
     val first = courses.first()
+    val groupId = first.trackingGroupId
+    var displayedCourses by remember(groupId) { mutableStateOf(courses) }
+    var draggingCourseId by remember(groupId) { mutableStateOf<String?>(null) }
+    var hasLocalOrderChanges by remember(groupId) { mutableStateOf(false) }
+
+    LaunchedEffect(courses) {
+        val incomingIds = courses.map { it.courseId }
+        val displayedIds = displayedCourses.map { it.courseId }
+        when {
+            draggingCourseId != null -> Unit
+            !hasLocalOrderChanges -> displayedCourses = courses
+            incomingIds == displayedIds -> {
+                displayedCourses = courses
+                hasLocalOrderChanges = false
+            }
+        }
+    }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -190,22 +208,40 @@ private fun CourseGroupCard(
                 HorizontalDivider(Modifier.padding(vertical = 12.dp))
                 GroupBehaviorSelector(first.effectiveSelectedCourseBehavior, onBehaviorChange)
                 Spacer(Modifier.height(8.dp))
-                if (courses.size > 1) {
+                if (displayedCourses.size > 1) {
                     Text("长按拖动手柄调整组内优先级（越靠上越优先）", style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
                 }
-                courses.forEach { course ->
+                displayedCourses.forEachIndexed { index, course ->
                     key(course.courseId) {
                         DraggableTrackedLineItem(
                             course = course,
-                            index = courses.indexOf(course),
-                            groupSize = courses.size,
+                            index = index,
+                            groupSize = displayedCourses.size,
                             groupEnabled = first.isGroupMonitoringEnabled,
                             onToggle = { onToggleCourse(course, it) },
                             onAutoSelectToggle = { onAutoSelectToggle(course, it) },
                             onClearMessage = { onClearMessage(course) },
                             onDelete = { onDeleteCourse(course) },
-                            onMove = { onMoveCourse(course, it) }
+                            onDragStart = { draggingCourseId = course.courseId },
+                            onMove = { direction ->
+                                val from = displayedCourses.indexOfFirst { it.courseId == course.courseId }
+                                val reordered = CourseOrderEditor.move(displayedCourses, from, direction)
+                                if (reordered !== displayedCourses) {
+                                    displayedCourses = reordered
+                                    hasLocalOrderChanges = true
+                                }
+                            },
+                            onDragEnd = {
+                                draggingCourseId = null
+                                val finalOrder = displayedCourses.map { it.courseId }
+                                if (hasLocalOrderChanges && finalOrder != courses.map { it.courseId }) {
+                                    onPersistOrder(groupId, finalOrder)
+                                } else {
+                                    displayedCourses = courses
+                                    hasLocalOrderChanges = false
+                                }
+                            }
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -271,7 +307,9 @@ private fun DraggableTrackedLineItem(
     onAutoSelectToggle: (Boolean) -> Unit,
     onClearMessage: () -> Unit,
     onDelete: () -> Unit,
-    onMove: (Int) -> Unit
+    onDragStart: () -> Unit,
+    onMove: (Int) -> Unit,
+    onDragEnd: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val spacingPx = with(LocalDensity.current) { 8.dp.toPx() }
@@ -280,7 +318,6 @@ private fun DraggableTrackedLineItem(
     var cardHeight by remember(course.courseId) { mutableIntStateOf(0) }
     var previousIndex by remember(course.courseId) { mutableIntStateOf(index) }
     var dragOffset by remember(course.courseId) { mutableFloatStateOf(0f) }
-    var dragDistanceSinceMove by remember(course.courseId) { mutableFloatStateOf(0f) }
     var isDragging by remember(course.courseId) { mutableStateOf(false) }
     var movePending by remember(course.courseId) { mutableStateOf(false) }
 
@@ -326,28 +363,26 @@ private fun DraggableTrackedLineItem(
                 onDragStart = {
                     scope.launch { settlingOffset.stop() }
                     isDragging = true
-                    dragDistanceSinceMove = 0f
+                    onDragStart()
                 },
                 onDrag = { delta ->
                     dragOffset += delta
-                    dragDistanceSinceMove += delta
                     val threshold = ((cardHeight + spacingPx) * 0.45f).coerceAtLeast(spacingPx * 2)
                     val direction = when {
-                        dragDistanceSinceMove > threshold && index < groupSize - 1 -> 1
-                        dragDistanceSinceMove < -threshold && index > 0 -> -1
+                        dragOffset > threshold && index < groupSize - 1 -> 1
+                        dragOffset < -threshold && index > 0 -> -1
                         else -> 0
                     }
                     if (direction != 0 && !movePending) {
                         movePending = true
-                        dragDistanceSinceMove -= direction * (cardHeight + spacingPx)
                         onMove(direction)
                     }
                 },
                 onDragEnd = {
                     val releaseOffset = dragOffset
                     dragOffset = 0f
-                    dragDistanceSinceMove = 0f
                     isDragging = false
+                    onDragEnd()
                     scope.launch {
                         settlingOffset.snapTo(releaseOffset)
                         settlingOffset.animateTo(
@@ -369,17 +404,20 @@ private fun ReorderHandle(
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit
 ) {
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
     Icon(
         Icons.Default.DragHandle,
         contentDescription = "长按拖动调整优先级",
         modifier = Modifier.size(32.dp).pointerInput(groupId, courseId) {
             detectDragGesturesAfterLongPress(
-                onDragStart = { onDragStart() },
-                onDragEnd = onDragEnd,
-                onDragCancel = onDragEnd,
+                onDragStart = { currentOnDragStart() },
+                onDragEnd = { currentOnDragEnd() },
+                onDragCancel = { currentOnDragEnd() },
                 onDrag = { change, amount ->
                     change.consume()
-                    onDrag(amount.y)
+                    currentOnDrag(amount.y)
                 }
             )
         },

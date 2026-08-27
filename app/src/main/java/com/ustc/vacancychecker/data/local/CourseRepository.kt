@@ -301,6 +301,36 @@ class CourseRepository @Inject constructor(
         }
     }
 
+    /** 按一次拖动手势结束时的最终顺序统一写入，避免拖动中频繁等待 DataStore。 */
+    suspend fun setCourseOrder(groupId: String, orderedCourseIds: List<String>) {
+        context.dataStore.edit { preferences ->
+            val currentList = readCourses(preferences)
+            val groupCourses = currentList.filter { it.trackingGroupId == groupId }
+            if (groupCourses.size < 2) return@edit
+
+            val validIds = groupCourses.map { it.courseId }.toSet()
+            val normalizedOrder = buildList {
+                orderedCourseIds.distinct().filterTo(this) { it in validIds }
+                groupCourses
+                    .sortedWith(compareBy<TrackedCourse> { it.priority ?: currentList.indexOf(it) })
+                    .map { it.courseId }
+                    .filterTo(this) { it !in this }
+            }
+            if (normalizedOrder.size != groupCourses.size) return@edit
+            val priorities = normalizedOrder.withIndex().associate { it.value to it.index }
+            var changed = false
+            for (index in currentList.indices) {
+                priorities[currentList[index].courseId]?.let { priority ->
+                    if (currentList[index].priority != priority) {
+                        currentList[index] = currentList[index].copy(priority = priority)
+                        changed = true
+                    }
+                }
+            }
+            if (changed) writeCourses(preferences, currentList)
+        }
+    }
+
     /**
      * 切换单个课程的自动选课开关
      */
