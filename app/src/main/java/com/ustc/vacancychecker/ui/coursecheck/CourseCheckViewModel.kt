@@ -11,6 +11,7 @@ import com.ustc.vacancychecker.data.local.CredentialsManager
 import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.model.TrackedCourse
 import com.ustc.vacancychecker.data.model.VerificationCodeMethod
+import com.ustc.vacancychecker.data.remote.CatalogCourseResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -18,7 +19,8 @@ import javax.inject.Inject
 @HiltViewModel
 class CourseCheckViewModel @Inject constructor(
     private val credentialsManager: CredentialsManager,
-    private val courseRepository: CourseRepository
+    private val courseRepository: CourseRepository,
+    private val catalogCourseResolver: CatalogCourseResolver
 ) : ViewModel() {
     
     var uiState by mutableStateOf(CourseCheckUiState())
@@ -170,24 +172,63 @@ class CourseCheckViewModel @Inject constructor(
         
         viewModelScope.launch {
             try {
+                uiState = uiState.copy(isResolvingTracking = true, errorMessage = null)
                 val vacancyResult = uiState.result
                 val defaultAutoSelect = courseRepository.isAutoSelectEnabled()
-                courseRepository.addTrackedCourses(listOf(
-                    TrackedCourse(
+                val authority = catalogCourseResolver.resolve(listOf(code))[code]
+                if (authority == null) {
+                    uiState = uiState.copy(
+                        isResolvingTracking = false,
+                        errorMessage = "无法从课程目录确认课堂 $code 的课程标识，未加入跟踪"
+                    )
+                    return@launch
+                }
+                val trackedCourse = TrackedCourse(
                         courseId = code,
                         courseName = uiState.courseName ?: "未命名课程",
+                        courseKey = authority.courseKey,
+                        courseNumber = authority.courseNumber,
                         teacher = uiState.teacher ?: "未知",
                         isMonitoring = true,
                         lastCheckTime = System.currentTimeMillis(),
                         vacancy = vacancyResult?.let { it.limitCount - it.stdCount }?.takeIf { it >= 0 } ?: 0,
                         autoSelectEnabled = defaultAutoSelect
                     )
-                ))
-                uiState = uiState.copy(showSuccessMessage = "成功加入后台跟踪队列")
+                val sameGroup = courseRepository.getTrackedCourses().filter {
+                    it.courseKey == authority.courseKey && it.courseId != code
+                }
+                if (sameGroup.isNotEmpty()) {
+                    uiState = uiState.copy(
+                        isResolvingTracking = false,
+                        pendingTrackedCourse = trackedCourse,
+                        trackingConflictMessage = "[${trackedCourse.courseName}] 已有备选课堂：${sameGroup.joinToString { it.courseId }}。\n\n加入后会按组内优先级依次尝试，是否继续？"
+                    )
+                } else {
+                    commitTrackedCourse(trackedCourse)
+                }
             } catch (e: Exception) {
-                uiState = uiState.copy(errorMessage = "加入跟踪失败: ${e.message}")
+                uiState = uiState.copy(isResolvingTracking = false, errorMessage = "加入跟踪失败: ${e.message}")
             }
         }
+    }
+
+    fun confirmTrackingAdd() {
+        val pending = uiState.pendingTrackedCourse ?: return
+        viewModelScope.launch { commitTrackedCourse(pending) }
+    }
+
+    fun cancelTrackingAdd() {
+        uiState = uiState.copy(pendingTrackedCourse = null, trackingConflictMessage = null)
+    }
+
+    private suspend fun commitTrackedCourse(course: TrackedCourse) {
+        courseRepository.addTrackedCourse(course)
+        uiState = uiState.copy(
+            isResolvingTracking = false,
+            pendingTrackedCourse = null,
+            trackingConflictMessage = null,
+            showSuccessMessage = "成功加入后台跟踪队列"
+        )
     }
     
     fun getCredentials(): Pair<String, String>? {
@@ -210,7 +251,10 @@ data class CourseCheckUiState(
     val autoSelectEnabled: Boolean = false,
     val verificationCodeMethod: VerificationCodeMethod = VerificationCodeMethod.SMS,
     val isSelecting: Boolean = false,
-    val selectResult: SelectResult? = null
+    val selectResult: SelectResult? = null,
+    val isResolvingTracking: Boolean = false,
+    val pendingTrackedCourse: TrackedCourse? = null,
+    val trackingConflictMessage: String? = null
 )
 
 data class VacancyResult(

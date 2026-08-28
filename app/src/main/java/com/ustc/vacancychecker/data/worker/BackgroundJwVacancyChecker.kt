@@ -9,6 +9,12 @@ import android.view.ViewGroup
 import android.webkit.*
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.SelectResult
+import com.ustc.vacancychecker.data.model.CourseCheckRequest
+import com.ustc.vacancychecker.data.model.CourseCheckResult
+import com.ustc.vacancychecker.data.model.CourseTrackingPlanner
+import com.ustc.vacancychecker.data.model.CourseSwitchResult
+import com.ustc.vacancychecker.data.model.CourseSwitchState
+import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
 import com.ustc.vacancychecker.data.remote.CourseCheckScriptUtils
 import com.ustc.vacancychecker.data.remote.LoginScriptUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -27,25 +33,58 @@ class BackgroundJwVacancyChecker @Inject constructor(
     companion object {
         private const val TAG = "BgJwChecker"
         private const val COURSE_SELECT_URL = "https://jw.ustc.edu.cn/for-std/course-select" 
+        private const val COURSE_ADJUSTMENT_URL_PREFIX = "https://jw.ustc.edu.cn/for-std/course-adjustment-apply"
         private const val TIMEOUT_MS = 120000L // 120秒超时，查多门课需要更长的时间
         private const val MSG_ALREADY_SELECTED = "已选课程"
         private const val MAX_RETRY_COUNT = 3 // 最大重试次数
         private const val MAX_ERROR_COUNT = 3 // 最大网络错误次数
     }
 
+    private data class CourseObservation(
+        val request: CourseCheckRequest,
+        val vacancy: Int,
+        val isAlreadySelected: Boolean,
+        val hasDropButton: Boolean,
+        val hasSwitchButton: Boolean
+    )
+
+    private enum class SwitchPath { DROP_THEN_SELECT, ADJUSTMENT_APPLY }
+
+    private enum class SwitchStage {
+        CLICKING_SOURCE_ACTION,
+        CONFIRMING_DROP,
+        SEARCHING_TARGET_AFTER_DROP,
+        SELECTING_TARGET_AFTER_DROP,
+        WAITING_TARGET_SELECT_RESULT,
+        WAITING_ADJUSTMENT_PAGE,
+        SEARCHING_ADJUSTMENT_TARGET,
+        WAITING_APPLICATION_FORM,
+        FILLING_APPLICATION_FORM,
+        WAITING_SUBMIT_OUTCOME
+    }
+
+    private data class ActiveSwitchOperation(
+        val sourceRequest: CourseCheckRequest,
+        val targetObservation: CourseObservation,
+        val path: SwitchPath,
+        var stage: SwitchStage,
+        val actionLog: MutableList<String> = mutableListOf()
+    )
+
     @SuppressLint("SetJavaScriptEnabled")
     suspend fun performCheck(
-        classCodes: List<String>,
+        requests: List<CourseCheckRequest>,
         username: String,
-        password: String,
-        autoSelectMap: Map<String, Boolean> = emptyMap()
-    ): Result<Map<String, Pair<Int, SelectResult?>>> {
+        password: String
+    ): Result<Map<String, CourseCheckResult>> {
         if (username.isBlank() || password.isBlank()) {
             return Result.failure(Exception("用户名或密码为空"))
         }
-        if (classCodes.isEmpty()) {
+        if (requests.isEmpty()) {
             return Result.success(emptyMap())
         }
+
+        val classCodes = requests.map { it.courseId }
 
         return try {
             val verificationCodeMethod = courseRepository.verificationCodeMethodFlow.first()
@@ -56,7 +95,12 @@ class BackgroundJwVacancyChecker @Inject constructor(
                     
                     mainHandler.post {
                         var isResumed = false
-                        val resultMap = mutableMapOf<String, Pair<Int, SelectResult?>>()
+                        val resultMap = mutableMapOf<String, CourseCheckResult>()
+                        val skippedCourseIds = mutableSetOf<String>()
+                        val actionButtons = mutableMapOf<String, Pair<Boolean, Boolean>>()
+                        val observations = mutableMapOf<String, CourseObservation>()
+                        var activeSwitch: ActiveSwitchOperation? = null
+                        var adjustmentFormScriptInjected = false
                         var currentCourseIndex = 0
                         var isSelectingCourse = false
                         var currentVacancy = 0
@@ -71,7 +115,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                         var searchRetryCount = mutableMapOf<String, Int>() // 每个课程的搜索重试次数
                         var isReloading = false // 是否正在重新加载页面
                         
-                        fun resumeEx(result: Result<Map<String, Pair<Int, SelectResult?>>>) {
+                        fun resumeEx(result: Result<Map<String, CourseCheckResult>>) {
                             if (!isResumed && continuation.isActive) {
                                 isResumed = true
                                 try {
@@ -108,7 +152,17 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             }, 2000)
                         }
 
+                        fun skipRemainingAfterSelection(selectedRequest: CourseCheckRequest) {
+                            requests.drop(currentCourseIndex + 1)
+                                .filter { CourseTrackingPlanner.shouldSkipAfterSelection(selectedRequest, it) }
+                                .forEach { skippedCourseIds.add(it.courseId) }
+                        }
+
                         fun checkNextCourse() {
+                            while (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex] in skippedCourseIds) {
+                                Log.d(TAG, "Skipping ${classCodes[currentCourseIndex]} after same-group selection")
+                                currentCourseIndex++
+                            }
                             if (currentCourseIndex < classCodes.size) {
                                 val code = classCodes[currentCourseIndex]
                                 Log.d(TAG, "Checking course: $code")
@@ -135,6 +189,155 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                 Log.d(TAG, "All courses checked. Results: $resultMap")
                                 resumeEx(Result.success(resultMap))
                             }
+                        }
+
+                        fun completeSwitch(state: CourseSwitchState, message: String) {
+                            val operation = activeSwitch ?: return
+                            operation.actionLog.add(message)
+                            val sourceCode = operation.sourceRequest.courseId
+                            val targetCode = operation.targetObservation.request.courseId
+                            val sourceWasDropped = operation.path == SwitchPath.DROP_THEN_SELECT &&
+                                operation.stage in setOf(
+                                    SwitchStage.SEARCHING_TARGET_AFTER_DROP,
+                                    SwitchStage.SELECTING_TARGET_AFTER_DROP,
+                                    SwitchStage.WAITING_TARGET_SELECT_RESULT
+                                )
+                            val sourceResult = resultMap[sourceCode] ?: CourseCheckResult(
+                                vacancy = 0,
+                                isAlreadySelected = true
+                            )
+                            resultMap[sourceCode] = sourceResult.copy(
+                                isAlreadySelected = if (sourceWasDropped) false else sourceResult.isAlreadySelected,
+                                switchResult = CourseSwitchResult(
+                                    state = state,
+                                    sourceCourseId = sourceCode,
+                                    targetCourseId = targetCode,
+                                    message = message,
+                                    actionLog = operation.actionLog.toList()
+                                )
+                            )
+                            if (state == CourseSwitchState.VERIFIED && operation.path == SwitchPath.DROP_THEN_SELECT) {
+                                val targetResult = resultMap[targetCode] ?: CourseCheckResult(
+                                    vacancy = operation.targetObservation.vacancy,
+                                    isAlreadySelected = true
+                                )
+                                resultMap[targetCode] = targetResult.copy(isAlreadySelected = true)
+                            }
+                            activeSwitch = null
+                            adjustmentFormScriptInjected = false
+                            if (state == CourseSwitchState.FAILED) {
+                                resumeEx(Result.success(resultMap))
+                                return
+                            }
+                            skipRemainingAfterSelection(operation.sourceRequest)
+                            currentCourseIndex++
+                            checkNextCourse()
+                        }
+
+                        fun failSwitch(message: String) {
+                            val operation = activeSwitch
+                            val sourceDropped = operation?.path == SwitchPath.DROP_THEN_SELECT &&
+                                operation.stage in setOf(
+                                    SwitchStage.SEARCHING_TARGET_AFTER_DROP,
+                                    SwitchStage.SELECTING_TARGET_AFTER_DROP,
+                                    SwitchStage.WAITING_TARGET_SELECT_RESULT
+                                )
+                            val suffix = if (sourceDropped) "；当前课堂已完成退课，请立即人工检查" else ""
+                            completeSwitch(CourseSwitchState.FAILED, "换班失败：$message$suffix")
+                        }
+
+                        fun failSwitchOrReload() {
+                            if (activeSwitch != null) {
+                                failSwitch("换班过程中页面加载失败")
+                            } else {
+                                reloadPage()
+                            }
+                        }
+
+                        fun injectAdjustmentFormScript() {
+                            val operation = activeSwitch ?: return
+                            if (operation.path != SwitchPath.ADJUSTMENT_APPLY || adjustmentFormScriptInjected) return
+                            adjustmentFormScriptInjected = true
+                            operation.stage = SwitchStage.FILLING_APPLICATION_FORM
+                            operation.actionLog.add("已进入换班申请表单，准备填写申请原因")
+                            webView?.evaluateJavascript(
+                                CourseCheckScriptUtils.getFillAndSubmitAdjustmentScript("同课程换班"),
+                                null
+                            )
+                        }
+
+                        fun openAdjustmentTargetSearch() {
+                            val operation = activeSwitch ?: return
+                            val url = webView?.url.orEmpty()
+                            if (!url.startsWith(COURSE_ADJUSTMENT_URL_PREFIX)) {
+                                failSwitch("单课换班未跳转至规定页面，当前地址：$url")
+                                return
+                            }
+                            operation.stage = SwitchStage.SEARCHING_ADJUSTMENT_TARGET
+                            operation.actionLog.add("已确认进入课程调整申请页面：$url")
+                            webView?.evaluateJavascript(
+                                CourseCheckScriptUtils.getSearchAndApplyAdjustmentScript(operation.targetObservation.request.courseId),
+                                null
+                            )
+                        }
+
+                        fun maybeStartSwitch(selectedObservation: CourseObservation): Boolean {
+                            val selectedRequest = selectedObservation.request
+                            if (selectedRequest.selectedCourseBehavior != SelectedCourseBehavior.PRIORITY_UPGRADE) return false
+                            if (selectedRequest.pendingSwitchTargetId != null) return false
+                            val target = observations.values
+                                .filter {
+                                    it.request.groupId == selectedRequest.groupId &&
+                                        it.request.priority < selectedRequest.priority &&
+                                        it.vacancy > 0 &&
+                                        !it.isAlreadySelected
+                                }
+                                .minByOrNull { it.request.priority }
+                                ?: return false
+
+                            val path = when {
+                                selectedObservation.hasSwitchButton && selectedObservation.hasDropButton -> SwitchPath.ADJUSTMENT_APPLY
+                                selectedObservation.hasDropButton && !selectedObservation.hasSwitchButton -> SwitchPath.DROP_THEN_SELECT
+                                else -> {
+                                    activeSwitch = ActiveSwitchOperation(
+                                        selectedRequest,
+                                        target,
+                                        SwitchPath.DROP_THEN_SELECT,
+                                        SwitchStage.CLICKING_SOURCE_ACTION,
+                                        mutableListOf("发现更高优先级目标课堂 ${target.request.courseId}，但当前课堂按钮组合不受支持")
+                                    )
+                                    failSwitch("当前已选课堂未提供可安全识别的退课/换班按钮组合")
+                                    return true
+                                }
+                            }
+                            activeSwitch = ActiveSwitchOperation(
+                                sourceRequest = selectedRequest,
+                                targetObservation = target,
+                                path = path,
+                                stage = SwitchStage.CLICKING_SOURCE_ACTION,
+                                actionLog = mutableListOf(
+                                    "确认当前已选课堂：${selectedRequest.courseId}",
+                                    "发现更高优先级目标课堂：${target.request.courseId}，余量：${target.vacancy}",
+                                    "按钮组合：退课=${selectedObservation.hasDropButton}，换班=${selectedObservation.hasSwitchButton}"
+                                )
+                            )
+                            when (path) {
+                                SwitchPath.DROP_THEN_SELECT -> {
+                                    activeSwitch?.actionLog?.add("仅存在退课按钮，准备执行退课后选课")
+                                    webView?.evaluateJavascript(
+                                        CourseCheckScriptUtils.getClickDropButtonScript(selectedRequest.courseId),
+                                        null
+                                    )
+                                }
+                                SwitchPath.ADJUSTMENT_APPLY -> {
+                                    activeSwitch?.actionLog?.add("同时存在退课和换班按钮；禁止退课，准备点击换班")
+                                    webView?.evaluateJavascript(
+                                        CourseCheckScriptUtils.getClickSingleCourseSwitchScript(selectedRequest.courseId),
+                                        null
+                                    )
+                                }
+                            }
+                            return true
                         }
 
                         try {
@@ -212,18 +415,39 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     @JavascriptInterface
                                     fun onSearchComplete(code: String) {
                                         Log.d(TAG, "Search complete, reading vacancy...")
-                                        mainHandler.post {
+                                        mainHandler.post searchComplete@{
+                                            val operation = activeSwitch
+                                            if (operation != null &&
+                                                operation.stage == SwitchStage.SEARCHING_TARGET_AFTER_DROP &&
+                                                operation.targetObservation.request.courseId.equals(code, ignoreCase = true)
+                                            ) {
+                                                operation.stage = SwitchStage.SELECTING_TARGET_AFTER_DROP
+                                                operation.actionLog.add("退课完成后已重新定位目标课堂：$code")
+                                                mainHandler.postDelayed({
+                                                    webView?.evaluateJavascript(
+                                                        CourseCheckScriptUtils.getClickSelectButtonScript(code),
+                                                        null
+                                                    )
+                                                }, 700)
+                                                return@searchComplete
+                                            }
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 val js = CourseCheckScriptUtils.getReadVacancyScript(code)
                                                 webView?.evaluateJavascript(js, null)
                                             }
                                         }
                                     }
+
+                                    @JavascriptInterface
+                                    fun onCourseActionButtons(code: String, hasDropButton: Boolean, hasSwitchButton: Boolean) {
+                                        Log.d(TAG, "Action buttons for $code: drop=$hasDropButton, switch=$hasSwitchButton")
+                                        actionButtons[code] = hasDropButton to hasSwitchButton
+                                    }
                                     
                                     @JavascriptInterface
                                     fun onSearchError(code: String, message: String) {
                                         Log.w(TAG, "Search error for $code: $message")
-                                        mainHandler.post {
+                                        mainHandler.post searchError@{
                                             // 搜索失败，尝试重试
                                             val retryCount = searchRetryCount.getOrDefault(code, 0)
                                             if (retryCount < MAX_RETRY_COUNT) {
@@ -234,6 +458,14 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 }, 1000)
                                             } else {
                                                 Log.w(TAG, "Max retry count reached for $code, skipping")
+                                                val operation = activeSwitch
+                                                if (operation != null &&
+                                                    operation.stage == SwitchStage.SEARCHING_TARGET_AFTER_DROP &&
+                                                    operation.targetObservation.request.courseId.equals(code, ignoreCase = true)
+                                                ) {
+                                                    failSwitch("退课后无法重新定位目标课堂：$message")
+                                                    return@searchError
+                                                }
                                                 currentCourseIndex++
                                                 checkNextCourse()
                                             }
@@ -243,15 +475,57 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     @JavascriptInterface
                                     fun onVacancyResult(code: String, stdCount: Int, limitCount: Int, courseName: String, teacher: String, hasSelectButton: Boolean, isAlreadySelected: Boolean) {
                                         Log.d(TAG, "Vacancy result: $stdCount/$limitCount (name=$courseName, teacher=$teacher, hasSelectButton=$hasSelectButton, isAlreadySelected=$isAlreadySelected)")
-                                        mainHandler.post {
+                                        mainHandler.post vacancyResult@{
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 currentVacancy = maxOf(0, limitCount - stdCount)
                                                 
                                                 // 获取该课程的自动选课开关状态
-                                                val courseAutoSelectEnabled = autoSelectMap[code] ?: false
+                                                val currentRequest = requests[currentCourseIndex]
+                                                val courseAutoSelectEnabled = currentRequest.autoSelectEnabled
+                                                val buttons = actionButtons[code] ?: (false to false)
+                                                val observation = CourseObservation(
+                                                    request = currentRequest,
+                                                    vacancy = currentVacancy,
+                                                    isAlreadySelected = isAlreadySelected,
+                                                    hasDropButton = buttons.first,
+                                                    hasSwitchButton = buttons.second
+                                                )
+                                                observations[code] = observation
+
+                                                if (isAlreadySelected && currentRequest.pendingSwitchTargetId == code) {
+                                                    resultMap[code] = CourseCheckResult(
+                                                        vacancy = currentVacancy,
+                                                        isAlreadySelected = true,
+                                                        switchResult = CourseSwitchResult(
+                                                            state = CourseSwitchState.VERIFIED,
+                                                            sourceCourseId = currentRequest.pendingSwitchSourceId.orEmpty(),
+                                                            targetCourseId = code,
+                                                            message = "换班成功：目标课堂 $code 已显示为已选中",
+                                                            actionLog = listOf("下一轮核验目标课堂 $code：已选中")
+                                                        )
+                                                    )
+                                                    skipRemainingAfterSelection(currentRequest)
+                                                    currentCourseIndex++
+                                                    checkNextCourse()
+                                                    return@vacancyResult
+                                                }
+
+                                                if (isAlreadySelected && maybeStartSwitch(observation)) {
+                                                    resultMap[code] = CourseCheckResult(
+                                                        vacancy = currentVacancy,
+                                                        isAlreadySelected = true
+                                                    )
+                                                    return@vacancyResult
+                                                }
                                                 
                                                 // 如果启用自动选课，有空位，有选课按钮，且未选中，则触发选课
-                                                if (courseAutoSelectEnabled && currentVacancy > 0 && hasSelectButton && !isAlreadySelected) {
+                                                if (
+                                                    courseAutoSelectEnabled &&
+                                                    currentRequest.selectedCourseBehavior != SelectedCourseBehavior.PRIORITY_UPGRADE &&
+                                                    currentVacancy > 0 &&
+                                                    hasSelectButton &&
+                                                    !isAlreadySelected
+                                                ) {
                                                     Log.d(TAG, "Auto-select enabled for $code, triggering select...")
                                                     isSelectingCourse = true
                                                     mainHandler.postDelayed({
@@ -260,7 +534,13 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                     }, 1000)
                                                 } else {
                                                     // 否则直接记录结果并继续下一门课
-                                                    resultMap[code] = Pair(currentVacancy, null)
+                                                    resultMap[code] = CourseCheckResult(
+                                                        vacancy = currentVacancy,
+                                                        isAlreadySelected = isAlreadySelected
+                                                    )
+                                                    if (isAlreadySelected) {
+                                                        skipRemainingAfterSelection(currentRequest)
+                                                    }
                                                     currentCourseIndex++
                                                     checkNextCourse()
                                                 }
@@ -271,7 +551,33 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     @JavascriptInterface
                                     fun onSelectButtonClickResult(success: Boolean, message: String) {
                                         Log.d(TAG, "Select button click result: success=$success, message=$message")
-                                        mainHandler.post {
+                                        mainHandler.post selectButtonResult@{
+                                            val operation = activeSwitch
+                                            if (operation != null &&
+                                                operation.path == SwitchPath.DROP_THEN_SELECT &&
+                                                operation.stage == SwitchStage.SELECTING_TARGET_AFTER_DROP
+                                            ) {
+                                                if (!success) {
+                                                    if (message.contains(MSG_ALREADY_SELECTED)) {
+                                                        completeSwitch(
+                                                            CourseSwitchState.VERIFIED,
+                                                            "换班成功：目标课堂 ${operation.targetObservation.request.courseId} 已显示为已选中"
+                                                        )
+                                                    } else {
+                                                        failSwitch("退课后选中目标课堂失败：$message")
+                                                    }
+                                                } else {
+                                                    operation.stage = SwitchStage.WAITING_TARGET_SELECT_RESULT
+                                                    operation.actionLog.add("已点击目标课堂 ${operation.targetObservation.request.courseId} 的选课按钮")
+                                                    mainHandler.postDelayed({
+                                                        webView?.evaluateJavascript(
+                                                            CourseCheckScriptUtils.getCheckSelectResultScript(),
+                                                            null
+                                                        )
+                                                    }, 1500)
+                                                }
+                                                return@selectButtonResult
+                                            }
                                             if (success && isSelectingCourse) {
                                                 // 等待选课结果
                                                 mainHandler.postDelayed({
@@ -283,11 +589,19 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
                                                 if (code.isNotEmpty()) {
                                                     val isAlreadySelected = message.contains(MSG_ALREADY_SELECTED)
-                                                    resultMap[code] = Pair(currentVacancy, SelectResult(
+                                                    val selectResult = SelectResult(
                                                         success = isAlreadySelected,
                                                         message = message,
                                                         isAlreadySelected = isAlreadySelected
-                                                    ))
+                                                    )
+                                                    resultMap[code] = CourseCheckResult(
+                                                        vacancy = currentVacancy,
+                                                        isAlreadySelected = isAlreadySelected,
+                                                        selectResult = selectResult
+                                                    )
+                                                    if (isAlreadySelected) {
+                                                        skipRemainingAfterSelection(requests[currentCourseIndex])
+                                                    }
                                                     currentCourseIndex++
                                                     checkNextCourse()
                                                 }
@@ -298,12 +612,166 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     @JavascriptInterface
                                     fun onSelectResult(success: Boolean, message: String) {
                                         Log.d(TAG, "Select result: success=$success, message=$message")
-                                        mainHandler.post {
+                                        mainHandler.post selectResult@{
+                                            val operation = activeSwitch
+                                            if (operation != null &&
+                                                operation.path == SwitchPath.DROP_THEN_SELECT &&
+                                                operation.stage == SwitchStage.WAITING_TARGET_SELECT_RESULT
+                                            ) {
+                                                if (success) {
+                                                    completeSwitch(
+                                                        CourseSwitchState.VERIFIED,
+                                                        "换班成功：已退选 ${operation.sourceRequest.courseId} 并选中 ${operation.targetObservation.request.courseId}"
+                                                    )
+                                                } else {
+                                                    failSwitch("退课后选中目标课堂失败：$message")
+                                                }
+                                                return@selectResult
+                                            }
                                             val code = if (currentCourseIndex < classCodes.size) classCodes[currentCourseIndex] else ""
                                             if (code.isNotEmpty()) {
-                                                resultMap[code] = Pair(currentVacancy, SelectResult(success, message))
+                                                resultMap[code] = CourseCheckResult(
+                                                    vacancy = currentVacancy,
+                                                    isAlreadySelected = false,
+                                                    selectResult = SelectResult(success, message)
+                                                )
+                                                if (success) {
+                                                    skipRemainingAfterSelection(requests[currentCourseIndex])
+                                                }
                                                 currentCourseIndex++
                                                 checkNextCourse()
+                                            }
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onDropButtonClickResult(success: Boolean, message: String) {
+                                        Log.d(TAG, "Drop button click result: success=$success, message=$message")
+                                        mainHandler.post dropButtonResult@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.DROP_THEN_SELECT ||
+                                                operation.stage != SwitchStage.CLICKING_SOURCE_ACTION
+                                            ) return@dropButtonResult
+                                            if (!success) {
+                                                failSwitch("点击退课按钮失败：$message")
+                                                return@dropButtonResult
+                                            }
+                                            operation.stage = SwitchStage.CONFIRMING_DROP
+                                            operation.actionLog.add(message)
+                                            mainHandler.postDelayed({
+                                                webView?.evaluateJavascript(
+                                                    CourseCheckScriptUtils.getConfirmDropResultScript(operation.sourceRequest.courseId),
+                                                    null
+                                                )
+                                            }, 500)
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onDropConfirmResult(success: Boolean, message: String) {
+                                        Log.d(TAG, "Drop confirm result: success=$success, message=$message")
+                                        mainHandler.post dropConfirmResult@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.DROP_THEN_SELECT ||
+                                                operation.stage != SwitchStage.CONFIRMING_DROP
+                                            ) return@dropConfirmResult
+                                            if (!success) {
+                                                failSwitch("确认退课失败：$message")
+                                                return@dropConfirmResult
+                                            }
+                                            operation.stage = SwitchStage.SEARCHING_TARGET_AFTER_DROP
+                                            operation.actionLog.add(message)
+                                            webView?.evaluateJavascript(
+                                                CourseCheckScriptUtils.getQuickSearchScript(operation.targetObservation.request.courseId),
+                                                null
+                                            )
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onSingleCourseSwitchResult(success: Boolean, message: String) {
+                                        Log.d(TAG, "Single course switch result: success=$success, message=$message")
+                                        mainHandler.post singleCourseSwitchResult@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.ADJUSTMENT_APPLY ||
+                                                operation.stage != SwitchStage.CLICKING_SOURCE_ACTION
+                                            ) return@singleCourseSwitchResult
+                                            if (!success) {
+                                                failSwitch("进入单课换班失败：$message")
+                                                return@singleCourseSwitchResult
+                                            }
+                                            operation.stage = SwitchStage.WAITING_ADJUSTMENT_PAGE
+                                            operation.actionLog.add(message)
+                                            mainHandler.postDelayed({
+                                                if (activeSwitch === operation &&
+                                                    operation.stage == SwitchStage.WAITING_ADJUSTMENT_PAGE
+                                                ) {
+                                                    openAdjustmentTargetSearch()
+                                                }
+                                            }, 8000)
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onAdjustmentApplyResult(success: Boolean, message: String) {
+                                        Log.d(TAG, "Adjustment apply result: success=$success, message=$message")
+                                        mainHandler.post adjustmentApplyResult@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.ADJUSTMENT_APPLY ||
+                                                operation.stage != SwitchStage.SEARCHING_ADJUSTMENT_TARGET
+                                            ) return@adjustmentApplyResult
+                                            if (!success) {
+                                                failSwitch("定位目标课堂并申请失败：$message")
+                                                return@adjustmentApplyResult
+                                            }
+                                            operation.stage = SwitchStage.WAITING_APPLICATION_FORM
+                                            operation.actionLog.add(message)
+                                            adjustmentFormScriptInjected = false
+                                            mainHandler.postDelayed({ injectAdjustmentFormScript() }, 1500)
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onAdjustmentSubmitClicked(success: Boolean, message: String) {
+                                        Log.d(TAG, "Adjustment submit click result: success=$success, message=$message")
+                                        mainHandler.post adjustmentSubmitClicked@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.ADJUSTMENT_APPLY ||
+                                                operation.stage != SwitchStage.FILLING_APPLICATION_FORM
+                                            ) return@adjustmentSubmitClicked
+                                            if (!success) {
+                                                failSwitch("填写或提交换班申请失败：$message")
+                                                return@adjustmentSubmitClicked
+                                            }
+                                            operation.stage = SwitchStage.WAITING_SUBMIT_OUTCOME
+                                            operation.actionLog.add(message)
+                                            mainHandler.postDelayed({
+                                                webView?.evaluateJavascript(
+                                                    CourseCheckScriptUtils.getCheckAdjustmentSubmitOutcomeScript(),
+                                                    null
+                                                )
+                                            }, 500)
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onAdjustmentSubmitOutcome(hasPopup: Boolean, message: String) {
+                                        Log.d(TAG, "Adjustment submit outcome: hasPopup=$hasPopup, message=$message")
+                                        mainHandler.post adjustmentSubmitOutcome@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.ADJUSTMENT_APPLY ||
+                                                operation.stage != SwitchStage.WAITING_SUBMIT_OUTCOME
+                                            ) return@adjustmentSubmitOutcome
+                                            if (hasPopup) {
+                                                failSwitch("提交换班申请后出现弹窗：$message")
+                                            } else {
+                                                completeSwitch(CourseSwitchState.PENDING_VERIFICATION, message)
                                             }
                                         }
                                     }
@@ -311,7 +779,15 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     @JavascriptInterface
                                     fun onCourseNotFound(code: String) {
                                         Log.w(TAG, "Course not found")
-                                        mainHandler.post {
+                                        mainHandler.post courseNotFound@{
+                                            val operation = activeSwitch
+                                            if (operation != null &&
+                                                operation.stage == SwitchStage.SEARCHING_TARGET_AFTER_DROP &&
+                                                operation.targetObservation.request.courseId.equals(code, ignoreCase = true)
+                                            ) {
+                                                failSwitch("退课后未找到目标课堂 $code")
+                                                return@courseNotFound
+                                            }
                                             if (currentCourseIndex < classCodes.size && classCodes[currentCourseIndex].equals(code, ignoreCase = true)) {
                                                 // 没找到则直接继续下一门课，不报错
                                                 currentCourseIndex++
@@ -327,6 +803,22 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                         Log.d(TAG, "Page finished: $url")
                                         
                                         if (url != null) {
+                                            val operation = activeSwitch
+                                            if (operation?.path == SwitchPath.ADJUSTMENT_APPLY &&
+                                                url.startsWith(COURSE_ADJUSTMENT_URL_PREFIX)
+                                            ) {
+                                                when (operation.stage) {
+                                                    SwitchStage.WAITING_ADJUSTMENT_PAGE -> {
+                                                        view?.postDelayed({ openAdjustmentTargetSearch() }, 500)
+                                                        return
+                                                    }
+                                                    SwitchStage.WAITING_APPLICATION_FORM -> {
+                                                        view?.postDelayed({ injectAdjustmentFormScript() }, 500)
+                                                        return
+                                                    }
+                                                    else -> Unit
+                                                }
+                                            }
                                             if (url.contains("id.ustc.edu.cn") || url.contains("passport.ustc.edu.cn")) {
                                                 view?.evaluateJavascript(LoginScriptUtils.getCredentialCaptureScript(), null)
                                                 view?.evaluateJavascript(
@@ -358,7 +850,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                         // 只处理主框架的错误
                                         if (request?.isForMainFrame == true && !isResumed) {
                                             mainHandler.post {
-                                                reloadPage()
+                                                failSwitchOrReload()
                                             }
                                         }
                                     }
@@ -370,7 +862,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                         // 只处理主框架的错误
                                         if (request?.isForMainFrame == true && !isResumed) {
                                             mainHandler.post {
-                                                reloadPage()
+                                                failSwitchOrReload()
                                             }
                                         }
                                     }
@@ -379,6 +871,18 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
                                         result?.confirm()
+                                        val operation = activeSwitch
+                                        if (operation?.path == SwitchPath.ADJUSTMENT_APPLY &&
+                                            operation.stage in setOf(
+                                                SwitchStage.FILLING_APPLICATION_FORM,
+                                                SwitchStage.WAITING_SUBMIT_OUTCOME
+                                            )
+                                        ) {
+                                            view?.post {
+                                                failSwitch("提交换班申请后出现弹窗：${message.orEmpty()}")
+                                            }
+                                            return true
+                                        }
                                         if (message?.contains("公告") == true || message?.contains("选课") == true) {
                                             if (!hasHandledAnnouncement && hasEnteredCourseSelect) {
                                                 hasHandledAnnouncement = true
@@ -397,6 +901,22 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                     
                                     override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
                                         result?.confirm()
+                                        val operation = activeSwitch
+                                        if (operation != null) {
+                                            if (operation.path == SwitchPath.ADJUSTMENT_APPLY &&
+                                                operation.stage in setOf(
+                                                    SwitchStage.FILLING_APPLICATION_FORM,
+                                                    SwitchStage.WAITING_SUBMIT_OUTCOME
+                                                )
+                                            ) {
+                                                view?.post {
+                                                    failSwitch("提交换班申请后出现确认弹窗：${message.orEmpty()}")
+                                                }
+                                            } else {
+                                                operation.actionLog.add("已确认页面提示：${message.orEmpty()}")
+                                            }
+                                            return true
+                                        }
                                         if (message?.contains("公告") == true || message?.contains("选课") == true) {
                                             if (!hasHandledAnnouncement && hasEnteredCourseSelect) {
                                                 hasHandledAnnouncement = true
@@ -408,6 +928,29 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                             }
                                         }
                                         return true
+                                    }
+
+                                    override fun onJsPrompt(
+                                        view: WebView?,
+                                        url: String?,
+                                        message: String?,
+                                        defaultValue: String?,
+                                        result: JsPromptResult?
+                                    ): Boolean {
+                                        val operation = activeSwitch
+                                        if (operation?.path == SwitchPath.ADJUSTMENT_APPLY &&
+                                            operation.stage in setOf(
+                                                SwitchStage.FILLING_APPLICATION_FORM,
+                                                SwitchStage.WAITING_SUBMIT_OUTCOME
+                                            )
+                                        ) {
+                                            result?.cancel()
+                                            view?.post {
+                                                failSwitch("提交换班申请后出现输入弹窗：${message.orEmpty()}")
+                                            }
+                                            return true
+                                        }
+                                        return super.onJsPrompt(view, url, message, defaultValue, result)
                                     }
                                 }
                                 

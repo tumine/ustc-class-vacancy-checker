@@ -77,7 +77,7 @@ class CourseMonitoringService : Service() {
         ) { interval, courses ->
             MonitoringConfiguration(
                 intervalMinutes = interval,
-                courseCount = courses.count { it.isMonitoring }
+                courseCount = courses.count { it.isEffectivelyMonitoring }
             )
         }
             .distinctUntilChanged()

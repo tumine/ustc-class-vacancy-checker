@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.model.TrackedCourse
+import com.ustc.vacancychecker.data.remote.CatalogCourseResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -15,7 +16,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class CourseLookupViewModel @Inject constructor(
-    private val courseRepository: CourseRepository
+    private val courseRepository: CourseRepository,
+    private val catalogCourseResolver: CatalogCourseResolver
 ) : ViewModel() {
 
     var uiState by mutableStateOf(CourseLookupUiState())
@@ -136,29 +138,81 @@ class CourseLookupViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
+                uiState = uiState.copy(isResolvingTracking = true, errorMessage = null)
                 val defaultAutoSelect = courseRepository.isAutoSelectEnabled()
-                val coursesToTrack = uiState.results
-                    .filter { selectedCodes.contains(it.classCode) }
+                val selected = uiState.results.filter { selectedCodes.contains(it.classCode) }
+                val metadata = catalogCourseResolver.resolve(selected.map { it.classCode })
+                val unresolved = selected.filterNot { metadata.containsKey(it.classCode) }
+                if (unresolved.isNotEmpty()) {
+                    uiState = uiState.copy(
+                        isResolvingTracking = false,
+                        errorMessage = "无法从课程目录确认以下课堂的课程标识，未加入跟踪：${unresolved.joinToString { it.classCode }}"
+                    )
+                    return@launch
+                }
+                val coursesToTrack = selected
                     .map {
+                        val authority = metadata.getValue(it.classCode)
                         TrackedCourse(
                             courseId = it.classCode,
                             courseName = it.courseName,
+                            courseKey = authority.courseKey,
+                            courseNumber = authority.courseNumber,
                             teacher = it.teacher,
                             isMonitoring = true,
                             autoSelectEnabled = defaultAutoSelect
                         )
                     }
-                
-                courseRepository.addTrackedCourses(coursesToTrack)
-                uiState = uiState.copy(
-                    selectedForTracking = emptySet(),
-                    showSuccessMessage = "成功添加 ${coursesToTrack.size} 门课程到后台跟踪列表"
-                )
+
+                val existing = courseRepository.getTrackedCourses()
+                val conflicts = coursesToTrack.groupBy { it.courseKey }.mapNotNull { (key, additions) ->
+                    val tracked = existing.filter { it.courseKey == key && additions.none { added -> added.courseId == it.courseId } }
+                    if (tracked.isEmpty()) null else additions to tracked
+                }
+                if (conflicts.isNotEmpty()) {
+                    val summary = conflicts.joinToString("\n\n") { (additions, tracked) ->
+                        "${additions.first().courseName}\n已有：${tracked.joinToString { it.courseId }}\n新增：${additions.joinToString { it.courseId }}"
+                    }
+                    uiState = uiState.copy(
+                        isResolvingTracking = false,
+                        pendingCoursesToTrack = coursesToTrack,
+                        trackingConflictMessage = "以下课堂将加入已有课程组，并按组内优先级依次尝试：\n\n$summary"
+                    )
+                } else {
+                    commitTracking(coursesToTrack)
+                }
             } catch (e: Exception) {
                 Log.e("CourseLookup", "Failed to add courses to tracking", e)
+                uiState = uiState.copy(isResolvingTracking = false, errorMessage = "加入跟踪失败: ${e.message}")
+            }
+        }
+    }
+
+    fun confirmTrackingAdd() {
+        val pending = uiState.pendingCoursesToTrack
+        if (pending.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                commitTracking(pending)
+            } catch (e: Exception) {
                 uiState = uiState.copy(errorMessage = "加入跟踪失败: ${e.message}")
             }
         }
+    }
+
+    fun cancelTrackingAdd() {
+        uiState = uiState.copy(pendingCoursesToTrack = emptyList(), trackingConflictMessage = null)
+    }
+
+    private suspend fun commitTracking(courses: List<TrackedCourse>) {
+        courseRepository.addTrackedCourses(courses)
+        uiState = uiState.copy(
+            isResolvingTracking = false,
+            selectedForTracking = emptySet(),
+            pendingCoursesToTrack = emptyList(),
+            trackingConflictMessage = null,
+            showSuccessMessage = "成功添加 ${courses.size} 个课堂到后台跟踪列表"
+        )
     }
 }
 
@@ -171,7 +225,10 @@ data class CourseLookupUiState(
     val errorMessage: String? = null,
     val warningMessage: String? = null,
     val selectedForTracking: Set<String> = emptySet(),
-    val showSuccessMessage: String? = null
+    val showSuccessMessage: String? = null,
+    val isResolvingTracking: Boolean = false,
+    val pendingCoursesToTrack: List<TrackedCourse> = emptyList(),
+    val trackingConflictMessage: String? = null
 )
 
 enum class SearchType {

@@ -29,7 +29,7 @@ class MonitoringBootReceiver : BroadcastReceiver() {
                     ReceiverEntryPoint::class.java
                 ).courseRepository()
                 val interval = repository.monitoringIntervalFlow.first()
-                val hasMonitoredCourses = repository.getTrackedCourses().any { it.isMonitoring }
+                val hasMonitoredCourses = repository.getTrackedCourses().any { it.isEffectivelyMonitoring }
                 if (interval > 0 && hasMonitoredCourses) {
                     CourseMonitoringService.start(context.applicationContext)
                 } else {

@@ -1,99 +1,140 @@
 <div align="center">
   <img src="images/app_icon.png" width="128" alt="USTC 选课余量检测 Logo">
   <h1>USTC 选课余量检测</h1>
+  <p>面向中国科学技术大学教务系统的 Android 选课余量检测与后台跟踪工具</p>
 </div>
 
-一款 Android 应用，用于自动检测中国科学技术大学教务系统（jw.ustc.edu.cn）中指定课程的选课余量。
+> 当前源码版本：**1.5.0**（`versionCode 10`）
+
+本应用用于查询中国科学技术大学教务系统（`jw.ustc.edu.cn`）中的课程余量，并按用户配置在后台持续跟踪、发送空位通知或尝试选课。同一门课程的多个课堂可以作为一个课程组管理，并按优先级执行选课或换班策略。
 
 ## 功能特性
 
-- **自动登录**：通过 USTC 统一身份认证（CAS）自动登录教务系统，凭证加密存储于本地
-- **课程检索与余量查询**：支持按课程名称、课堂代码、教师姓名检索全校课程，实时查看已选人数与人数上限
-- **后台监控与空位通知**：将关注的课程加入跟踪列表，后台自动定时轮询余量，发现空位即时发送系统通知提醒
-- **智能选课**：检测到空位后自动点击选课按钮；自动识别已选课程，避免重复操作
-- **应用内更新检查**：支持从 GitHub Releases 检查最新版本更新
+- **统一身份认证登录**：自动填写 USTC 统一身份认证账号和密码，凭证使用 Android `EncryptedSharedPreferences` 加密保存在本机
+- **二次验证辅助**：可在设置中选择自动请求手机验证码、邮件验证码，或关闭自动请求；收到验证码后仍需用户完成验证
+- **课程检索与余量查询**：支持按课程名称、课堂号或教师姓名检索课程，查看已选人数、人数上限和空余名额
+- **即时检测与自动选课**：在首页按课堂号立即检测；开启自动选课后，发现空位会尝试点击选课按钮，并识别已经选中的课堂以避免重复操作
+- **后台持续跟踪**：使用前台服务维持用户设置的轮询周期，由 WorkManager 执行单次检查与失败重试；设备重启后可恢复已启用的监控
+- **课程组与备选课堂**：根据课程目录返回的权威课程标识，将同一课程的多个课堂归入一组；支持课程组总开关、单课堂开关和单课堂自动选课开关
+- **组内优先级**：可长按拖动课堂卡片调整优先级，越靠上的课堂越优先，顺序会持久化保存
+- **已选课堂处理策略**：每个课程组可独立选择“优先级升级”“禁用本课程跟踪”或“删除本课程跟踪”，默认采用安全的“禁用本课程跟踪”
+- **空位与执行结果通知**：发现空位、自动选课或换班执行失败时发送系统通知，跟踪列表中保留最近的执行状态
+- **应用内更新**：可从设置页面检查 GitHub Releases，并在后台下载新版 APK
 
-## 系统要求
+## 多课堂跟踪与换班
 
-- Android 14 (API 34) 及以上
+将同一门课程的多个课堂加入跟踪后，应用会按组内顺序依次检查。课程组和课堂开关必须同时开启，该课堂才会参与后台检查。
+
+当应用确认组内某个课堂已经选中或本轮选课成功时，会执行该组配置的策略：
+
+| 策略 | 行为 |
+|------|------|
+| 优先级升级 | 仅继续跟踪比当前已选课堂优先级更高的课堂；发现空位后，根据教务页面提供的按钮执行“退课后选课”或提交“单课换班”申请 |
+| 禁用本课程跟踪 | 暂停整个课程组，保留各课堂开关和优先级，之后可手动恢复；这是新课程组的默认策略 |
+| 删除本课程跟踪 | 删除当前课程组内的全部跟踪条目，不影响其他课程组 |
+
+启用“优先级升级”前请确认课堂排序无误。该策略明确授权应用自动操作当前已选课堂：页面仅有“退课”按钮时，会先退掉当前课堂再尝试选择目标课堂；页面同时提供“退课”和“换班”按钮时，只会走“单课换班”申请流程。换班提交后会标记为待核验，并在后续检测中确认目标课堂是否已选中；任一步骤失败都会停止操作并记录错误。
+
+添加课堂时，应用会先通过课程目录确认课程标识。同课程已存在其他备选课堂时，会集中展示冲突摘要并请求确认。旧版本保存且暂时无法确认课程标识的课堂会保持为独立分组，应用不会根据课堂号前缀猜测课程；进入跟踪页后会尝试识别并安全归组。
+
+## 使用方法
+
+1. 打开应用，输入 USTC 统一身份认证账号和密码。二次验证默认自动请求手机验证码；登录后可在“设置 → 二次验证方式”中改为邮件验证码或关闭自动请求，供后续登录使用。
+2. 在首页输入课堂号并点击“开始检测”，即可查看该课堂的余量与选中状态；首页“自动选课”总开关位于设置页面。
+3. 点击课程检索入口，按课程、课堂号或教师搜索，勾选一个或多个课堂后加入后台跟踪。
+4. 进入“后台跟踪队列”，展开课程组，配置组总开关、课堂开关、单课堂自动选课开关和已选课堂处理策略。
+5. 如有多个备选课堂，长按拖动手柄调整优先级。可使用页面右上角的刷新按钮立即执行一次后台检查。
+6. 授予通知权限并允许前台服务运行，以便及时收到空位和执行结果通知。监控间隔可在设置页调整，正式版本支持 5～240 分钟。
 
 ## 技术栈
 
 | 技术 | 用途 |
 |------|------|
-| Kotlin | 开发语言 |
-| Jetpack Compose | UI 框架 |
-| Material 3 | 设计语言 |
+| Kotlin、Coroutines、Flow | 应用逻辑与异步状态管理 |
+| Jetpack Compose、Material 3 | 声明式界面与设计系统 |
 | Hilt | 依赖注入 |
-| 前台服务 + WorkManager | 前台服务维持用户配置的轮询计时，WorkManager 执行单次联网检查与失败重试 |
-| DataStore | 跟踪课程列表的本地持久化 |
-| OkHttp & Gson | 轻量级原生网络请求与 JSON 解析 |
-| WebView + JavaScript 注入 | 自动化操作教务系统页面 |
-| EncryptedSharedPreferences | 加密存储用户凭证 |
+| 前台服务、WorkManager | 后台监控调度、单轮检测与失败重试 |
+| DataStore | 跟踪队列、课程组策略与设置持久化 |
+| OkHttp、Gson | 课程目录、版本信息等网络请求与 JSON 解析 |
+| WebView、JavaScript 注入 | 登录、余量检测、选课与换班页面自动化 |
+| EncryptedSharedPreferences | 本地凭证加密存储 |
 
-## 使用方法
+## 系统与构建要求
 
-1. 打开应用，输入 USTC 统一身份认证账号密码
-2. 登录成功后进入主界面，可直接输入课堂号或通过关键字检索全校课程
-3. **即时检测**：输入课堂号后点击「开始检测」，实时查看课程余量
-4. **智能选课**：开启自动选课后，检测到空位将自动点击选课按钮；已选课程会自动识别并提示
-5. **后台捡漏**：将课程加入跟踪列表，后台自动轮询余量，发现空位即时通知
-6. **检查更新**：在设置页面点击「检查更新」获取最新版本
-
-## 构建
+- Android 14（API 34）及以上
+- JDK 17
+- Android SDK 35
+- Gradle 8.9（项目已包含 Gradle Wrapper）
 
 ```bash
 # 克隆项目
 git clone https://github.com/tumine/ustc-class-vacancy-checker.git
 cd ustc-class-vacancy-checker
 
-# 构建 Debug APK
-./gradlew assembleDebug
+# macOS / Linux：运行单元测试并构建 Debug APK
+./gradlew testDebugUnitTest assembleDebug
+
+# Windows
+.\gradlew.bat testDebugUnitTest assembleDebug
 
 # 构建 Release APK
 ./gradlew assembleRelease
 ```
 
+构建产物位于 `app/build/outputs/apk/`。已发布版本可在 [GitHub Releases](https://github.com/tumine/ustc-class-vacancy-checker/releases) 查看。
+
 ## 项目结构
 
-```
+```text
 app/src/main/java/com/ustc/vacancychecker/
-├── MainActivity.kt                    # 入口 Activity
-├── VacancyCheckerApp.kt               # Application 类 (含 WorkManager 配置)
+├── MainActivity.kt                         # 入口 Activity
+├── VacancyCheckerApp.kt                    # Application 与 WorkManager 配置
 ├── data/
 │   ├── local/
-│   │   ├── CredentialsManager.kt      # 加密凭证管理
-│   │   └── CourseRepository.kt        # 课程追踪持久化 DataStore 
+│   │   ├── CredentialsManager.kt           # 本地加密凭证管理
+│   │   └── CourseRepository.kt             # 跟踪队列、策略和设置持久化
 │   ├── model/
-│   │   └── TrackedCourse.kt           # 课程数据类实体
+│   │   ├── TrackedCourse.kt                # 跟踪课堂、课程组策略与换班状态
+│   │   ├── CourseCheckResult.kt            # 后台检查和换班结果
+│   │   ├── CourseGroupMerger.kt            # 历史课堂安全归组
+│   │   └── CourseTrackingPlanner.kt        # 分组、排序与跳过规则
 │   ├── remote/
-│   │   ├── CatalogScriptUtils.kt      # 课程目录检索 JS 脚本
-│   │   ├── CourseCheckScriptUtils.kt  # 选课页面 JS 脚本
-│   │   ├── LoginScriptUtils.kt        # 登录页面 JS 脚本
-│   │   └── UpdateChecker.kt           # GitHub Releases 更新检查
+│   │   ├── CatalogCourseResolver.kt        # 从课程目录解析权威课程标识
+│   │   ├── CatalogScriptUtils.kt           # 课程目录页面自动化脚本
+│   │   ├── CourseCheckScriptUtils.kt       # 检测、选课及换班脚本
+│   │   ├── LoginScriptUtils.kt             # 登录与二次验证脚本
+│   │   └── UpdateChecker.kt                # GitHub Releases 更新检查
 │   ├── service/
-│   │   ├── CourseMonitoringService.kt # 按用户设置的间隔维持后台监控
-│   │   └── MonitoringBootReceiver.kt  # 设备重启后恢复已启用的监控
+│   │   ├── CourseMonitoringService.kt      # 持续维持后台监控周期
+│   │   └── MonitoringBootReceiver.kt       # 开机恢复监控
 │   └── worker/
-│       ├── ClassVacancyWorker.kt      # 执行单次空位检测的后台 Worker
-│       └── BackgroundJwVacancyChecker.kt # 后台 WebView 检测逻辑
-├── di/
-│   └── AppModule.kt                   # Hilt 依赖注入模块
+│       ├── ClassVacancyWorker.kt           # 单轮后台任务编排
+│       └── BackgroundJwVacancyChecker.kt   # 后台 WebView 检测与操作
+├── di/                                      # Hilt 依赖注入
 └── ui/
-    ├── coursecheck/                   # 选课查询主页
-    ├── courselookup/                  # 课程检索查询页面
-    ├── login/                         # 登录界面
-    ├── navigation/                    # 导航图与路由
-    ├── settings/                      # 设置页面
-    ├── tracker/                       # 后台跟踪与轮询列表界面
-    └── theme/                         # Material 3 主题
+    ├── coursecheck/                         # 即时检测主页
+    ├── courselookup/                        # 课程检索与批量加入跟踪
+    ├── login/                               # 登录界面
+    ├── navigation/                          # 导航与路由
+    ├── settings/                            # 监控、选课、验证和更新设置
+    ├── tracker/                             # 分组跟踪、排序与策略配置
+    └── theme/                               # Material 3 主题
 ```
 
-## 隐私说明
+核心分组、排序、选课页面解析和换班规划均有 JVM 单元测试，测试代码位于 `app/src/test/`。
 
-- 用户的账号密码仅保存在本地设备中，使用 Android `EncryptedSharedPreferences` 加密存储
-- 应用不会将凭证上传至任何第三方服务器
-- 所有操作均通过 WebView 在用户设备上完成
+## 近期版本变化
+
+- **1.5.0（当前源码）**：增加短信/邮件二次验证请求；实现多课堂课程组、组内优先级、组级处理策略、历史课堂自动归组，以及同课程自动换班流程
+- **1.4.3**：提高教务页面已选人数与余量检测的稳定性
+- **1.4.2**：重构后台监控调度，支持短于 15 分钟的轮询间隔和设备重启后恢复
+
+## 隐私与风险说明
+
+- 账号和密码仅加密保存在本机，并用于登录 USTC 统一身份认证；应用不会将凭证上传到开发者或其他第三方服务器
+- 课程查询、余量检测和选课操作由设备直接访问 USTC 相关服务；版本检查与 APK 下载会访问 GitHub
+- 自动选课和“优先级升级”会对教务系统执行真实操作，可能受到网络状态、页面改版、选课规则或名额竞争影响，不保证最终选课成功
+- 本项目为非官方工具，与中国科学技术大学无隶属或授权关系。请遵守学校相关规定，并自行承担自动化操作带来的风险
 
 ## 许可证
 

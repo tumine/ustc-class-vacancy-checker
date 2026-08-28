@@ -682,6 +682,8 @@ object CourseCheckScriptUtils {
                     var selectButton = targetRow.querySelector('button, a, span[onclick], input[type="button"]');
                     var hasSelectButton = false;
                     var isAlreadySelected = false;
+                    var hasDropButton = false;
+                    var hasSwitchButton = false;
                     
                     // 策略1: 检测选课状态字段（优先级最高）
                     var allCells = targetRow.querySelectorAll('td, .cell, span, div');
@@ -706,11 +708,27 @@ object CourseCheckScriptUtils {
                             // 检测退课按钮
                             if ((btnText.indexOf('退课') !== -1 || btnText.indexOf('退选') !== -1) && btn.offsetWidth > 0) {
                                 isAlreadySelected = true;
+                                hasDropButton = true;
                                 console.log("Detected '退课' button: " + btnText);
                                 break;
                             }
                         }
                     }
+
+                    // 无论是否已通过状态文字识别，都完整记录当前已选课堂的按钮组合。
+                    var actionButtons = targetRow.querySelectorAll('button, a, span, input[type="button"], div[onclick]');
+                    for (var abi = 0; abi < actionButtons.length; abi++) {
+                        var actionButton = actionButtons[abi];
+                        if (actionButton.offsetWidth <= 0) continue;
+                        var actionText = (actionButton.innerText || actionButton.textContent || actionButton.value || '').trim();
+                        if (actionText.indexOf('退课') !== -1 || actionText.indexOf('退选') !== -1) {
+                            hasDropButton = true;
+                        }
+                        if (actionText.indexOf('换班') !== -1) {
+                            hasSwitchButton = true;
+                        }
+                    }
+                    try { AndroidBridge.onCourseActionButtons("$safeCode", hasDropButton, hasSwitchButton); } catch(e) {}
                     
                     // 策略3: 检测选课按钮
                     if (!isAlreadySelected) {
@@ -897,6 +915,290 @@ object CourseCheckScriptUtils {
             })();
         """.trimIndent()
     }
+
+    /**
+     * 仅在当前已选课堂没有“换班”按钮时点击“退课”。脚本自身再次执行安全校验，
+     * 避免 Kotlin 层与页面 DOM 更新之间发生竞态而误退课。
+     */
+    fun getClickDropButtonScript(classCode: String): String {
+        val safeCode = escapeJs(classCode)
+        return """
+            (function() {
+                var code = "$safeCode".toLowerCase();
+                var rows = Array.from(document.querySelectorAll('tr, .course-row, .course-item')).filter(function(row) {
+                    return (row.innerText || row.textContent || '').toLowerCase().indexOf(code) !== -1;
+                });
+                if (rows.length !== 1) {
+                    try { AndroidBridge.onDropButtonClickResult(false, "无法唯一定位当前已选课堂"); } catch(e) {}
+                    return;
+                }
+                var buttons = Array.from(rows[0].querySelectorAll('button, a, span[onclick], input[type="button"], div[onclick]'))
+                    .filter(function(el) { return el.offsetWidth > 0; });
+                var switchButton = buttons.find(function(el) {
+                    return (el.innerText || el.textContent || el.value || '').trim().indexOf('换班') !== -1;
+                });
+                if (switchButton) {
+                    try { AndroidBridge.onDropButtonClickResult(false, "同时存在换班按钮，安全拒绝点击退课"); } catch(e) {}
+                    return;
+                }
+                var dropButtons = buttons.filter(function(el) {
+                    var text = (el.innerText || el.textContent || el.value || '').trim();
+                    return text.indexOf('退课') !== -1 || text.indexOf('退选') !== -1;
+                }).sort(function(a, b) {
+                    var at = (a.innerText || a.textContent || a.value || '').trim();
+                    var bt = (b.innerText || b.textContent || b.value || '').trim();
+                    return at.length - bt.length;
+                });
+                if (dropButtons.length === 0) {
+                    try { AndroidBridge.onDropButtonClickResult(false, "未找到退课按钮"); } catch(e) {}
+                    return;
+                }
+                dropButtons[0].click();
+                try { AndroidBridge.onDropButtonClickResult(true, "已点击当前课堂的退课按钮"); } catch(e) {}
+            })();
+        """.trimIndent()
+    }
+
+    /** 确认退课，并等待当前课堂的退课按钮消失。 */
+    fun getConfirmDropResultScript(classCode: String): String {
+        val safeCode = escapeJs(classCode)
+        return """
+            (function() {
+                var attempts = 0;
+                var confirmed = false;
+                var code = "$safeCode".toLowerCase();
+                function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+                function poll() {
+                    attempts++;
+                    var dialogs = Array.from(document.querySelectorAll('.modal, .dialog, .layui-layer, [role="dialog"], .ant-modal, .el-dialog'))
+                        .filter(visible);
+                    for (var i = 0; i < dialogs.length; i++) {
+                        var text = (dialogs[i].innerText || dialogs[i].textContent || '').trim();
+                        if (/失败|错误|不能|无法|禁止/.test(text)) {
+                            try { AndroidBridge.onDropConfirmResult(false, text); } catch(e) {}
+                            return;
+                        }
+                        if (!confirmed) {
+                            var confirm = Array.from(dialogs[i].querySelectorAll('button, a, input[type="button"]')).find(function(el) {
+                                var t = (el.innerText || el.textContent || el.value || '').trim();
+                                return visible(el) && (t === '确定' || t === '确认' || t.indexOf('确认退课') !== -1);
+                            });
+                            if (confirm) { confirmed = true; confirm.click(); }
+                        }
+                    }
+                    var rows = Array.from(document.querySelectorAll('tr, .course-row, .course-item')).filter(function(row) {
+                        return (row.innerText || row.textContent || '').toLowerCase().indexOf(code) !== -1;
+                    });
+                    if (rows.length === 1) {
+                        var hasDrop = Array.from(rows[0].querySelectorAll('button, a, span, input[type="button"], div[onclick]')).some(function(el) {
+                            var t = (el.innerText || el.textContent || el.value || '').trim();
+                            return visible(el) && (t.indexOf('退课') !== -1 || t.indexOf('退选') !== -1);
+                        });
+                        if (!hasDrop) {
+                            try { AndroidBridge.onDropConfirmResult(true, "退课已确认"); } catch(e) {}
+                            return;
+                        }
+                    }
+                    if (attempts >= 30) {
+                        try { AndroidBridge.onDropConfirmResult(false, "退课后页面状态未发生变化"); } catch(e) {}
+                        return;
+                    }
+                    setTimeout(poll, 500);
+                }
+                poll();
+            })();
+        """.trimIndent()
+    }
+
+    /** 同时存在“退课”和“换班”时，只点击“换班”并选择“单课换班”。 */
+    fun getClickSingleCourseSwitchScript(classCode: String): String {
+        val safeCode = escapeJs(classCode)
+        return """
+            (function() {
+                var code = "$safeCode".toLowerCase();
+                function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+                var rows = Array.from(document.querySelectorAll('tr, .course-row, .course-item')).filter(function(row) {
+                    return (row.innerText || row.textContent || '').toLowerCase().indexOf(code) !== -1;
+                });
+                if (rows.length !== 1) {
+                    try { AndroidBridge.onSingleCourseSwitchResult(false, "无法唯一定位当前已选课堂"); } catch(e) {}
+                    return;
+                }
+                var buttons = Array.from(rows[0].querySelectorAll('button, a, span[onclick], input[type="button"], div[onclick]')).filter(visible);
+                var hasDrop = buttons.some(function(el) {
+                    var t = (el.innerText || el.textContent || el.value || '').trim();
+                    return t.indexOf('退课') !== -1 || t.indexOf('退选') !== -1;
+                });
+                var switches = buttons.filter(function(el) {
+                    return (el.innerText || el.textContent || el.value || '').trim().indexOf('换班') !== -1;
+                }).sort(function(a, b) {
+                    return (a.innerText || a.textContent || '').trim().length - (b.innerText || b.textContent || '').trim().length;
+                });
+                if (!hasDrop || switches.length === 0) {
+                    try { AndroidBridge.onSingleCourseSwitchResult(false, "当前课堂未同时出现退课和换班按钮"); } catch(e) {}
+                    return;
+                }
+                // 此分支绝不读取或点击 dropButtons。
+                switches[0].click();
+                var attempts = 0;
+                function clickMenu() {
+                    attempts++;
+                    var items = Array.from(document.querySelectorAll('li, a, button, [role="menuitem"], .dropdown-item')).filter(visible);
+                    var item = items.find(function(el) {
+                        return (el.innerText || el.textContent || '').trim() === '单课换班';
+                    });
+                    if (item) {
+                        item.click();
+                        try { AndroidBridge.onSingleCourseSwitchResult(true, "已点击换班并选择单课换班"); } catch(e) {}
+                        return;
+                    }
+                    if (attempts >= 20) {
+                        try { AndroidBridge.onSingleCourseSwitchResult(false, "未找到单课换班菜单项"); } catch(e) {}
+                        return;
+                    }
+                    setTimeout(clickMenu, 250);
+                }
+                setTimeout(clickMenu, 200);
+            })();
+        """.trimIndent()
+    }
+
+    /** 在换班申请列表中检索目标课堂，并点击该课堂左侧的“申请”。 */
+    fun getSearchAndApplyAdjustmentScript(targetClassCode: String): String {
+        val safeCode = escapeJs(targetClassCode)
+        return """
+            (function() {
+                var code = "$safeCode";
+                var attempts = 0;
+                function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+                function setNativeValue(el, value) {
+                    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    setter.call(el, value);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                function findAndApply() {
+                    attempts++;
+                    var inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])')).filter(visible);
+                    var input = inputs.find(function(el) {
+                        var p = (el.placeholder || '').toLowerCase();
+                        return p.indexOf('课堂') !== -1 || p.indexOf('课程') !== -1;
+                    }) || inputs[0];
+                    if (input && input.value !== code) {
+                        input.focus();
+                        setNativeValue(input, code);
+                        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+                        var search = Array.from(document.querySelectorAll('button, a')).find(function(el) {
+                            var t = (el.innerText || el.textContent || '').trim();
+                            return visible(el) && (t === '搜索' || t === '查询');
+                        });
+                        if (search) search.click();
+                    }
+                    var rows = Array.from(document.querySelectorAll('tr, .course-row, .course-item')).filter(function(row) {
+                        return (row.innerText || row.textContent || '').toLowerCase().indexOf(code.toLowerCase()) !== -1;
+                    });
+                    if (rows.length === 1) {
+                        var apply = Array.from(rows[0].querySelectorAll('button, a, span[onclick], input[type="button"]')).find(function(el) {
+                            var t = (el.innerText || el.textContent || el.value || '').trim();
+                            return visible(el) && (t === '申请' || (t.indexOf('申请') !== -1 && t.indexOf('已申请') === -1));
+                        });
+                        if (apply) {
+                            apply.click();
+                            try { AndroidBridge.onAdjustmentApplyResult(true, "已定位目标课堂并点击申请"); } catch(e) {}
+                            return;
+                        }
+                    }
+                    if (attempts >= 30) {
+                        try { AndroidBridge.onAdjustmentApplyResult(false, "未能按目标课堂号定位申请按钮"); } catch(e) {}
+                        return;
+                    }
+                    setTimeout(findAndApply, 500);
+                }
+                findAndApply();
+            })();
+        """.trimIndent()
+    }
+
+    /** 填写申请原因并点击页面底部“提交”。 */
+    fun getFillAndSubmitAdjustmentScript(reason: String = "同课程换班"): String {
+        val safeReason = escapeJs(reason)
+        return """
+            (function() {
+                var attempts = 0;
+                function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+                function setValue(el, value) {
+                    var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                    var setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                    setter.call(el, value);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                function fillAndSubmit() {
+                    attempts++;
+                    var labels = Array.from(document.querySelectorAll('label, .label, .form-label, td, th, span, div')).filter(function(el) {
+                        return visible(el) && (el.innerText || el.textContent || '').indexOf('申请原因及学生本人签名') !== -1;
+                    });
+                    var input = null;
+                    for (var i = 0; i < labels.length && !input; i++) {
+                        var container = labels[i].closest('.form-group, .form-item, tr, .row') || labels[i].parentElement;
+                        if (container) input = container.querySelector('textarea, input[type="text"]');
+                    }
+                    if (!input) input = Array.from(document.querySelectorAll('textarea')).find(visible);
+                    if (input && visible(input)) {
+                        setValue(input, "$safeReason");
+                        var submits = Array.from(document.querySelectorAll('button, input[type="submit"], a')).filter(function(el) {
+                            var t = (el.innerText || el.textContent || el.value || '').trim();
+                            return visible(el) && t === '提交';
+                        }).sort(function(a, b) { return b.getBoundingClientRect().top - a.getBoundingClientRect().top; });
+                        if (submits.length > 0) {
+                            submits[0].click();
+                            try { AndroidBridge.onAdjustmentSubmitClicked(true, "已填写同课程换班并点击提交"); } catch(e) {}
+                            return;
+                        }
+                    }
+                    if (attempts >= 30) {
+                        try { AndroidBridge.onAdjustmentSubmitClicked(false, "未找到申请原因文本框或页面底部提交按钮"); } catch(e) {}
+                        return;
+                    }
+                    setTimeout(fillAndSubmit, 500);
+                }
+                fillAndSubmit();
+            })();
+        """.trimIndent()
+    }
+
+    /** 提交后任何可见弹窗都按完整文本报错；持续 10 秒无弹窗才进入待核验。 */
+    fun getCheckAdjustmentSubmitOutcomeScript(): String = """
+        (function() {
+            var attempts = 0;
+            function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+            function poll() {
+                attempts++;
+                var popups = Array.from(document.querySelectorAll(
+                    '.modal, .dialog, .layui-layer, .alert, .toast, .message, [role="alert"], [role="dialog"], .ant-modal, .ant-message, .el-dialog, .el-message'
+                )).filter(visible);
+                if (popups.length > 0) {
+                    var fullText = popups.map(function(el) { return (el.innerText || el.textContent || '').trim(); })
+                        .filter(function(text) { return text.length > 0; }).join('\n---\n');
+                    try { AndroidBridge.onAdjustmentSubmitOutcome(true, fullText || "提交后出现未知弹窗"); } catch(e) {}
+                    return;
+                }
+                if (attempts >= 20) {
+                    try { AndroidBridge.onAdjustmentSubmitOutcome(false, "换班提交成功、待核验"); } catch(e) {}
+                    return;
+                }
+                setTimeout(poll, 500);
+            }
+            poll();
+        })();
+    """.trimIndent()
+
+    private fun escapeJs(value: String): String = value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("'", "\\'")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
 
     /**
      * 检测选课结果（成功/失败弹窗）

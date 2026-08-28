@@ -13,6 +13,10 @@ import com.ustc.vacancychecker.VacancyCheckerApp
 import com.ustc.vacancychecker.data.local.CourseRepository
 import com.ustc.vacancychecker.data.local.CredentialsManager
 import com.ustc.vacancychecker.data.model.SelectResult
+import com.ustc.vacancychecker.data.model.CourseTrackingPlanner
+import com.ustc.vacancychecker.data.model.CourseSwitchState
+import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
+import com.ustc.vacancychecker.data.remote.CatalogCourseResolver
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -22,7 +26,8 @@ class ClassVacancyWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val repository: CourseRepository,
     private val credentialsManager: CredentialsManager,
-    private val bgJwChecker: BackgroundJwVacancyChecker
+    private val bgJwChecker: BackgroundJwVacancyChecker,
+    private val catalogCourseResolver: CatalogCourseResolver
 ) : CoroutineWorker(appContext, workerParams) {
 
     companion object {
@@ -46,9 +51,26 @@ class ClassVacancyWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         Log.d("ClassVacancyWorker", "=== doWork() called ===")
-        val allCourses = repository.getTrackedCourses()
+        val storedCourses = repository.getTrackedCourses()
+        val missingCourseKeys = storedCourses
+            .filter { it.isMonitoring && it.isGroupMonitoringEnabled && it.courseKey == null }
+            .map { it.courseId }
+        val resolvedMetadata = catalogCourseResolver.resolve(missingCourseKeys)
+        for ((classCode, metadata) in resolvedMetadata) {
+            repository.updateCourseMetadata(classCode, metadata.courseKey, metadata.courseNumber)
+        }
+        val allCourses = storedCourses.map { course ->
+            resolvedMetadata[course.courseId]?.let { metadata ->
+                course.copy(
+                    courseKey = metadata.courseKey,
+                    courseNumber = metadata.courseNumber ?: course.courseNumber,
+                    courseName = metadata.courseName ?: course.courseName
+                )
+            } ?: course
+        }
         Log.d("ClassVacancyWorker", "Total courses: ${allCourses.size}")
-        val courses = allCourses.filter { it.isMonitoring }
+        val requests = CourseTrackingPlanner.buildRequests(allCourses)
+        val courses = requests.mapNotNull { request -> allCourses.firstOrNull { it.courseId == request.courseId } }
         Log.d("ClassVacancyWorker", "Monitoring courses: ${courses.size}")
         
         if (courses.isEmpty()) {
@@ -70,52 +92,80 @@ class ClassVacancyWorker @AssistedInject constructor(
                 return Result.failure()
             }
             
-            // 构建每个课程的自动选课开关映射
-            val autoSelectMap = courses.associate { it.courseId to (it.autoSelectEnabled ?: false) }
-            Log.d("ClassVacancyWorker", "Auto select map: $autoSelectMap")
-
-            val classCodes = courses.map { it.courseId }
-            val result = bgJwChecker.performCheck(classCodes, username, password, autoSelectMap)
+            val classCodes = requests.map { it.courseId }
+            val result = bgJwChecker.performCheck(requests, username, password)
 
             if (result.isSuccess) {
-                val vacancyMap = result.getOrThrow()
-                for (course in courses) {
-                    val data = vacancyMap[course.courseId]
+                val checkResults = result.getOrThrow()
+                val handledGroups = mutableSetOf<String>()
+                val handledSwitchGroups = mutableSetOf<String>()
+                val groupsWithSwitchResult = requests.mapNotNull { request ->
+                    request.groupId.takeIf { checkResults[request.courseId]?.switchResult != null }
+                }.toSet()
+                for (request in requests) {
+                    val course = allCourses.firstOrNull { it.courseId == request.courseId } ?: continue
+                    val data = checkResults[course.courseId]
                     if (data != null) {
-                        val vacancy = data.first
-                        val selectResult = data.second
+                        val vacancy = data.vacancy
+                        val selectResult = data.selectResult
                         Log.d("ClassVacancyWorker", "Check ${course.courseId}: $vacancy vacancy available, selectResult=$selectResult")
-                        
-                        // 如果有选课结果
-                        if (selectResult != null) {
-                            if (selectResult.success) {
-                                // 选课成功：发送通知并删除课程
+
+                        repository.updateCourseStatus(
+                            courseId = course.courseId,
+                            vacancy = vacancy,
+                            isAlreadySelected = data.isAlreadySelected,
+                            lastSelectMessage = selectResult?.message
+                        )
+
+                        data.switchResult?.takeIf { handledSwitchGroups.add(request.groupId) }?.let { switchResult ->
+                            repository.updateGroupSwitchState(
+                                groupId = request.groupId,
+                                sourceCourseId = switchResult.sourceCourseId,
+                                targetCourseId = switchResult.targetCourseId,
+                                state = switchResult.state,
+                                message = switchResult.message,
+                                actionLog = switchResult.actionLog
+                            )
+                            sendSwitchNotification(
+                                state = switchResult.state,
+                                sourceCourseId = switchResult.sourceCourseId,
+                                targetCourseId = switchResult.targetCourseId,
+                                message = switchResult.message,
+                                actionLog = switchResult.actionLog
+                            )
+                        }
+
+                        when {
+                            selectResult?.success == true && !selectResult.isAlreadySelected -> {
                                 sendSelectSuccessNotification(course.courseId, course.courseName, selectResult.message)
-                                repository.removeTrackedCourse(course.courseId)
-                            } else if (!selectResult.isAlreadySelected) {
-                                // 选课失败：发送通知，存储反馈信息，关闭自动选课开关
+                            }
+                            selectResult != null && !selectResult.success -> {
                                 sendSelectFailedNotification(course.courseId, course.courseName, selectResult.message)
                                 repository.updateCourseStatus(
                                     courseId = course.courseId,
                                     vacancy = vacancy,
                                     autoSelectEnabled = false,
-                                    lastSelectMessage = selectResult.message
+                                    lastSelectMessage = selectResult.message,
+                                    isAlreadySelected = false
                                 )
-                            } else {
-                                // 已选课程：仅更新状态
-                                repository.updateCourseStatus(course.courseId, vacancy)
                             }
-                        } else if (vacancy > 0) {
-                            // 只有空位但没有自动选课（可能已选或未启用自动选课）
-                            sendVacancyNotification(course.courseId, course.courseName, vacancy)
-                            repository.updateCourseStatus(course.courseId, vacancy)
-                        } else {
-                            // 没有空位，仅更新状态
-                            repository.updateCourseStatus(course.courseId, vacancy)
+                            vacancy > 0 && !data.isAlreadySelected && request.groupId !in groupsWithSwitchResult -> {
+                                sendVacancyNotification(course.courseId, course.courseName, vacancy)
+                            }
                         }
-                    } else {
-                        Log.w("ClassVacancyWorker", "Course ${course.courseId} not found in jw data")
-                        repository.updateCourseStatus(course.courseId, 0)
+
+                        if (data.selectionConfirmed && handledGroups.add(request.groupId)) {
+                            when (request.selectedCourseBehavior) {
+                                SelectedCourseBehavior.DISABLE_GROUP ->
+                                    repository.setGroupMonitoring(request.groupId, false)
+                                SelectedCourseBehavior.DELETE_GROUP ->
+                                    repository.removeTrackedGroup(request.groupId)
+                                SelectedCourseBehavior.PRIORITY_UPGRADE -> {
+                                    // 这里只应用安全的检查短路。自动退课/换班必须在页面按钮组合
+                                    // 得到完整验证后由专用状态机执行，不能降级为盲点“退课”。
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -230,5 +280,49 @@ class ClassVacancyWorker @AssistedInject constructor(
             .build()
 
         notificationManager.notify("${courseId}_select_failed".hashCode(), notification)
+    }
+
+    private fun sendSwitchNotification(
+        state: CourseSwitchState,
+        sourceCourseId: String,
+        targetCourseId: String,
+        message: String,
+        actionLog: List<String>
+    ) {
+        val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val intent = android.content.Intent(appContext, com.ustc.vacancychecker.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            appContext,
+            0,
+            intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val title = when (state) {
+            CourseSwitchState.PENDING_VERIFICATION -> "换班申请已提交，待核验"
+            CourseSwitchState.VERIFIED -> "换班成功"
+            CourseSwitchState.FAILED -> "换班失败"
+        }
+        val details = buildString {
+            append("$sourceCourseId → $targetCourseId\n$message")
+            if (actionLog.isNotEmpty()) {
+                append("\n\n执行记录：\n")
+                append(actionLog.joinToString("\n"))
+            }
+        }
+        val notification = NotificationCompat.Builder(appContext, VacancyCheckerApp.CHANNEL_ID)
+            .setSmallIcon(
+                if (state == CourseSwitchState.FAILED) android.R.drawable.ic_dialog_alert
+                else android.R.drawable.ic_dialog_info
+            )
+            .setContentTitle(title)
+            .setContentText("$sourceCourseId → $targetCourseId：$message")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(details))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        notificationManager.notify("${sourceCourseId}_${targetCourseId}_switch".hashCode(), notification)
     }
 }
