@@ -34,13 +34,6 @@ class SettingsViewModel @Inject constructor(
             initialValue = 60
         )
     
-    val autoSelectEnabled: StateFlow<Boolean> = repository.autoSelectEnabledFlow
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = false
-        )
-
     val verificationCodeMethod: StateFlow<VerificationCodeMethod> = repository.verificationCodeMethodFlow
         .stateIn(
             scope = viewModelScope,
@@ -59,12 +52,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
     
-    fun updateAutoSelectEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            repository.updateAutoSelectEnabled(enabled)
-        }
-    }
-
     fun updateVerificationCodeMethod(method: VerificationCodeMethod) {
         viewModelScope.launch {
             repository.updateVerificationCodeMethod(method)

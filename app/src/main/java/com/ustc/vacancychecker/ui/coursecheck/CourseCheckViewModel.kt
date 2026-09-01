@@ -43,6 +43,12 @@ class CourseCheckViewModel @Inject constructor(
         uiState = uiState.copy(classCode = code)
     }
 
+    fun updateAutoSelectEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            courseRepository.updateAutoSelectEnabled(enabled)
+        }
+    }
+
     fun addCourseToTrack(code: String) {
         if (code.isNotBlank() && !uiState.trackedCourses.contains(code)) {
             uiState = uiState.copy(trackedCourses = uiState.trackedCourses + code)

@@ -144,7 +144,36 @@ fun CourseCheckScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("按关键字查找课堂号")
             }
-            
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { viewModel.updateAutoSelectEnabled(!uiState.autoSelectEnabled) }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "自动选课", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "检测到空位后自动点击选课按钮",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    Switch(
+                        checked = uiState.autoSelectEnabled,
+                        onCheckedChange = viewModel::updateAutoSelectEnabled
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
             
             // 开始检测按钮
