@@ -7,7 +7,10 @@ import android.os.Looper
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.*
+import com.google.gson.Gson
 import com.ustc.vacancychecker.data.local.CourseRepository
+import com.ustc.vacancychecker.data.model.AdjustmentCourseEvaluator
+import com.ustc.vacancychecker.data.model.AdjustmentCourseTablePayload
 import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.model.CourseCheckRequest
 import com.ustc.vacancychecker.data.model.CourseCheckResult
@@ -57,7 +60,8 @@ class BackgroundJwVacancyChecker @Inject constructor(
         SELECTING_TARGET_AFTER_DROP,
         WAITING_TARGET_SELECT_RESULT,
         WAITING_ADJUSTMENT_PAGE,
-        SEARCHING_ADJUSTMENT_TARGET,
+        READING_ADJUSTMENT_TABLE,
+        CLICKING_ADJUSTMENT_TARGET,
         WAITING_APPLICATION_FORM,
         FILLING_APPLICATION_FORM,
         WAITING_SUBMIT_OUTCOME
@@ -65,9 +69,10 @@ class BackgroundJwVacancyChecker @Inject constructor(
 
     private data class ActiveSwitchOperation(
         val sourceRequest: CourseCheckRequest,
-        val targetObservation: CourseObservation,
+        var targetObservation: CourseObservation,
         val path: SwitchPath,
         var stage: SwitchStage,
+        val adjustmentCandidates: List<CourseObservation> = listOf(targetObservation),
         val actionLog: MutableList<String> = mutableListOf()
     )
 
@@ -95,6 +100,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                     
                     mainHandler.post {
                         var isResumed = false
+                        val gson = Gson()
                         val resultMap = mutableMapOf<String, CourseCheckResult>()
                         val skippedCourseIds = mutableSetOf<String>()
                         val actionButtons = mutableMapOf<String, Pair<Boolean, Boolean>>()
@@ -191,6 +197,13 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             }
                         }
 
+                        fun returnToCourseSelectAfterAdjustment() {
+                            hasClickedAllCoursesTab = false
+                            hasHandledAnnouncement = false
+                            hasEnteredCourseSelect = false
+                            webView?.loadUrl(COURSE_SELECT_URL)
+                        }
+
                         fun completeSwitch(state: CourseSwitchState, message: String) {
                             val operation = activeSwitch ?: return
                             operation.actionLog.add(message)
@@ -231,7 +244,11 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             }
                             skipRemainingAfterSelection(operation.sourceRequest)
                             currentCourseIndex++
-                            checkNextCourse()
+                            if (operation.path == SwitchPath.ADJUSTMENT_APPLY) {
+                                returnToCourseSelectAfterAdjustment()
+                            } else {
+                                checkNextCourse()
+                            }
                         }
 
                         fun failSwitch(message: String) {
@@ -244,6 +261,17 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                 )
                             val suffix = if (sourceDropped) "；当前课堂已完成退课，请立即人工检查" else ""
                             completeSwitch(CourseSwitchState.FAILED, "换班失败：$message$suffix")
+                        }
+
+                        fun finishAdjustmentWithoutSwitch(message: String) {
+                            val operation = activeSwitch ?: return
+                            operation.actionLog.add(message)
+                            Log.i(TAG, message)
+                            activeSwitch = null
+                            adjustmentFormScriptInjected = false
+                            skipRemainingAfterSelection(operation.sourceRequest)
+                            currentCourseIndex++
+                            returnToCourseSelectAfterAdjustment()
                         }
 
                         fun failSwitchOrReload() {
@@ -266,17 +294,17 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             )
                         }
 
-                        fun openAdjustmentTargetSearch() {
+                        fun openAdjustmentCourseTable() {
                             val operation = activeSwitch ?: return
                             val url = webView?.url.orEmpty()
                             if (!url.startsWith(COURSE_ADJUSTMENT_URL_PREFIX)) {
                                 failSwitch("单课换班未跳转至规定页面，当前地址：$url")
                                 return
                             }
-                            operation.stage = SwitchStage.SEARCHING_ADJUSTMENT_TARGET
+                            operation.stage = SwitchStage.READING_ADJUSTMENT_TABLE
                             operation.actionLog.add("已确认进入课程调整申请页面：$url")
                             webView?.evaluateJavascript(
-                                CourseCheckScriptUtils.getSearchAndApplyAdjustmentScript(operation.targetObservation.request.courseId),
+                                CourseCheckScriptUtils.getReadAdjustmentCourseTableScript(),
                                 null
                             )
                         }
@@ -285,39 +313,59 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             val selectedRequest = selectedObservation.request
                             if (selectedRequest.selectedCourseBehavior != SelectedCourseBehavior.PRIORITY_UPGRADE) return false
                             if (selectedRequest.pendingSwitchTargetId != null) return false
-                            val target = observations.values
+                            val candidates = requests
+                                .asSequence()
                                 .filter {
-                                    it.request.groupId == selectedRequest.groupId &&
-                                        it.request.priority < selectedRequest.priority &&
-                                        it.vacancy > 0 &&
-                                        !it.isAlreadySelected
+                                    it.groupId == selectedRequest.groupId &&
+                                        it.priority < selectedRequest.priority
                                 }
-                                .minByOrNull { it.request.priority }
-                                ?: return false
+                                .sortedBy { it.priority }
+                                .map { request ->
+                                    observations[request.courseId] ?: CourseObservation(
+                                        request = request,
+                                        vacancy = 0,
+                                        isAlreadySelected = false,
+                                        hasDropButton = false,
+                                        hasSwitchButton = false
+                                    )
+                                }
+                                .filterNot { it.isAlreadySelected }
+                                .toList()
+                            if (candidates.isEmpty()) return false
 
                             val path = when {
                                 selectedObservation.hasSwitchButton && selectedObservation.hasDropButton -> SwitchPath.ADJUSTMENT_APPLY
                                 selectedObservation.hasDropButton && !selectedObservation.hasSwitchButton -> SwitchPath.DROP_THEN_SELECT
                                 else -> {
+                                    val target = candidates.firstOrNull { it.vacancy > 0 } ?: return false
                                     activeSwitch = ActiveSwitchOperation(
-                                        selectedRequest,
-                                        target,
-                                        SwitchPath.DROP_THEN_SELECT,
-                                        SwitchStage.CLICKING_SOURCE_ACTION,
-                                        mutableListOf("发现更高优先级目标课堂 ${target.request.courseId}，但当前课堂按钮组合不受支持")
+                                        sourceRequest = selectedRequest,
+                                        targetObservation = target,
+                                        path = SwitchPath.DROP_THEN_SELECT,
+                                        stage = SwitchStage.CLICKING_SOURCE_ACTION,
+                                        actionLog = mutableListOf("发现更高优先级目标课堂 ${target.request.courseId}，但当前课堂按钮组合不受支持")
                                     )
                                     failSwitch("当前已选课堂未提供可安全识别的退课/换班按钮组合")
                                     return true
                                 }
+                            }
+                            val target = when (path) {
+                                SwitchPath.ADJUSTMENT_APPLY -> candidates.first()
+                                SwitchPath.DROP_THEN_SELECT -> candidates.firstOrNull { it.vacancy > 0 } ?: return false
                             }
                             activeSwitch = ActiveSwitchOperation(
                                 sourceRequest = selectedRequest,
                                 targetObservation = target,
                                 path = path,
                                 stage = SwitchStage.CLICKING_SOURCE_ACTION,
+                                adjustmentCandidates = if (path == SwitchPath.ADJUSTMENT_APPLY) candidates else listOf(target),
                                 actionLog = mutableListOf(
                                     "确认当前已选课堂：${selectedRequest.courseId}",
-                                    "发现更高优先级目标课堂：${target.request.courseId}，余量：${target.vacancy}",
+                                    if (path == SwitchPath.ADJUSTMENT_APPLY) {
+                                        "准备在单课换班页面统一评估 ${candidates.size} 个更高优先级意向课堂"
+                                    } else {
+                                        "发现更高优先级目标课堂：${target.request.courseId}，余量：${target.vacancy}"
+                                    },
                                     "按钮组合：退课=${selectedObservation.hasDropButton}，换班=${selectedObservation.hasSwitchButton}"
                                 )
                             )
@@ -709,9 +757,96 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 if (activeSwitch === operation &&
                                                     operation.stage == SwitchStage.WAITING_ADJUSTMENT_PAGE
                                                 ) {
-                                                    openAdjustmentTargetSearch()
+                                                    openAdjustmentCourseTable()
                                                 }
                                             }, 8000)
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onAdjustmentCourseTableResult(payloadJson: String) {
+                                        Log.d(TAG, "Received adjustment table payload (${payloadJson.length} chars)")
+                                        mainHandler.post adjustmentTableResult@{
+                                            val operation = activeSwitch
+                                            if (operation == null ||
+                                                operation.path != SwitchPath.ADJUSTMENT_APPLY ||
+                                                operation.stage != SwitchStage.READING_ADJUSTMENT_TABLE
+                                            ) return@adjustmentTableResult
+
+                                            val payload = try {
+                                                gson.fromJson(payloadJson, AdjustmentCourseTablePayload::class.java)
+                                            } catch (e: Exception) {
+                                                failSwitch("换班课程表返回了无效 JSON：${e.message.orEmpty()}")
+                                                return@adjustmentTableResult
+                                            }
+                                            if (payload == null) {
+                                                failSwitch("换班课程表返回内容为空")
+                                                return@adjustmentTableResult
+                                            }
+                                            if (!payload.error.isNullOrBlank()) {
+                                                failSwitch("未能完整抓取换班课程表：${payload.error}")
+                                                return@adjustmentTableResult
+                                            }
+                                            if (payload.courses.isEmpty()) {
+                                                failSwitch("换班课程表没有返回任何课程")
+                                                return@adjustmentTableResult
+                                            }
+
+                                            val candidateIds = operation.adjustmentCandidates.map { it.request.courseId }
+                                            val evaluation = AdjustmentCourseEvaluator.evaluate(candidateIds, payload.courses)
+                                            evaluation.effectiveVacancies.forEach { (courseId, vacancy) ->
+                                                val observation = operation.adjustmentCandidates.firstOrNull {
+                                                    it.request.courseId.equals(courseId, ignoreCase = true)
+                                                }
+                                                val previous = resultMap[courseId]
+                                                resultMap[courseId] = previous?.copy(vacancy = vacancy)
+                                                    ?: CourseCheckResult(
+                                                        vacancy = vacancy,
+                                                        isAlreadySelected = observation?.isAlreadySelected == true
+                                                    )
+                                            }
+                                            operation.adjustmentCandidates.forEach { candidate ->
+                                                payload.courses.firstOrNull {
+                                                    it.classCode.equals(candidate.request.courseId, ignoreCase = true)
+                                                }?.let { snapshot ->
+                                                    operation.actionLog.add(
+                                                        "换班页课堂 ${candidate.request.courseId}：${snapshot.rawSeatText}，" +
+                                                            "有效余量=${snapshot.effectiveVacancy}"
+                                                    )
+                                                }
+                                            }
+
+                                            if (!evaluation.error.isNullOrBlank()) {
+                                                failSwitch("本地评估换班课程失败：${evaluation.error}")
+                                                return@adjustmentTableResult
+                                            }
+                                            val targetSnapshot = evaluation.target
+                                            if (targetSnapshot == null) {
+                                                finishAdjustmentWithoutSwitch(
+                                                    "本轮已统一评估 ${candidateIds.size} 个意向课堂，均不满足“选中+待审核<课堂容量”"
+                                                )
+                                                return@adjustmentTableResult
+                                            }
+
+                                            val targetObservation = operation.adjustmentCandidates.first {
+                                                it.request.courseId.equals(targetSnapshot.classCode, ignoreCase = true)
+                                            }.copy(vacancy = targetSnapshot.effectiveVacancy)
+                                            operation.targetObservation = targetObservation
+                                            operation.stage = SwitchStage.CLICKING_ADJUSTMENT_TARGET
+                                            operation.actionLog.add(
+                                                "本地选定目标课堂 ${targetSnapshot.classCode}：" +
+                                                    "${targetSnapshot.selectedCount}+${targetSnapshot.pendingCount}<${targetSnapshot.classroomCapacity}"
+                                            )
+                                            webView?.evaluateJavascript(
+                                                CourseCheckScriptUtils.getClickAdjustmentApplyScript(
+                                                    targetClassCode = targetSnapshot.classCode,
+                                                    selectedCount = targetSnapshot.selectedCount!!,
+                                                    selectionLimit = targetSnapshot.selectionLimit!!,
+                                                    classroomCapacity = targetSnapshot.classroomCapacity!!,
+                                                    pendingCount = targetSnapshot.pendingCount!!
+                                                ),
+                                                null
+                                            )
                                         }
                                     }
 
@@ -722,7 +857,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                             val operation = activeSwitch
                                             if (operation == null ||
                                                 operation.path != SwitchPath.ADJUSTMENT_APPLY ||
-                                                operation.stage != SwitchStage.SEARCHING_ADJUSTMENT_TARGET
+                                                operation.stage != SwitchStage.CLICKING_ADJUSTMENT_TARGET
                                             ) return@adjustmentApplyResult
                                             if (!success) {
                                                 failSwitch("定位目标课堂并申请失败：$message")
@@ -809,7 +944,7 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                             ) {
                                                 when (operation.stage) {
                                                     SwitchStage.WAITING_ADJUSTMENT_PAGE -> {
-                                                        view?.postDelayed({ openAdjustmentTargetSearch() }, 500)
+                                                        view?.postDelayed({ openAdjustmentCourseTable() }, 500)
                                                         return
                                                     }
                                                     SwitchStage.WAITING_APPLICATION_FORM -> {

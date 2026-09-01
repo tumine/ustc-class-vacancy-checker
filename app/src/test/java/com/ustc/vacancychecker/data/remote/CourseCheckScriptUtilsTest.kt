@@ -54,13 +54,40 @@ class CourseCheckScriptUtilsTest {
     }
 
     @Test
-    fun `adjustment scripts search apply fill reason and submit`() {
-        val searchScript = CourseCheckScriptUtils.getSearchAndApplyAdjustmentScript("011144.02")
+    fun `adjustment table script reads combined seat column without applying`() {
+        val tableScript = CourseCheckScriptUtils.getReadAdjustmentCourseTableScript()
+
+        assertTrue(tableScript.contains("选中/选课上限/课堂容量/待审核人数"))
+        assertTrue(tableScript.contains("selectedCount: Number(match[1])"))
+        assertTrue(tableScript.contains("selectionLimit: Number(match[2])"))
+        assertTrue(tableScript.contains("classroomCapacity: Number(match[3])"))
+        assertTrue(tableScript.contains("pendingCount: Number(match[4])"))
+        assertTrue(tableScript.contains("onAdjustmentCourseTableResult(JSON.stringify(payload))"))
+        assertFalse(tableScript.contains("apply.click()"))
+    }
+
+    @Test
+    fun `adjustment apply script rechecks exact snapshot before click`() {
+        val applyScript = CourseCheckScriptUtils.getClickAdjustmentApplyScript(
+            targetClassCode = "011144.02",
+            selectedCount = 140,
+            selectionLimit = 140,
+            classroomCapacity = 143,
+            pendingCount = 2
+        )
+
+        assertTrue(applyScript.contains("011144.02"))
+        assertTrue(applyScript.contains("expectedCounts = [140, 140, 143, 2]"))
+        assertTrue(applyScript.contains("var unchanged"))
+        assertTrue(applyScript.indexOf("if (!unchanged)") < applyScript.indexOf("apply.click()"))
+        assertTrue(applyScript.contains("text === '申请'"))
+    }
+
+    @Test
+    fun `adjustment scripts fill reason and submit`() {
         val submitScript = CourseCheckScriptUtils.getFillAndSubmitAdjustmentScript()
         val outcomeScript = CourseCheckScriptUtils.getCheckAdjustmentSubmitOutcomeScript()
 
-        assertTrue(searchScript.contains("011144.02"))
-        assertTrue(searchScript.contains("t === '申请'"))
         assertTrue(submitScript.contains("申请原因及学生本人签名"))
         assertTrue(submitScript.contains("同课程换班"))
         assertTrue(submitScript.contains("t === '提交'"))

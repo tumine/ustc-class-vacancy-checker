@@ -1063,58 +1063,322 @@ object CourseCheckScriptUtils {
         """.trimIndent()
     }
 
-    /** 在换班申请列表中检索目标课堂，并点击该课堂左侧的“申请”。 */
-    fun getSearchAndApplyAdjustmentScript(targetClassCode: String): String {
+    /**
+     * 一次性抓取“单课换班”表格中的全部课程。浏览器端只做严格解析，不判断可用性、
+     * 不点击申请；选中人数、待审核人数和课堂容量的统一评估由 Kotlin 完成。
+     */
+    fun getReadAdjustmentCourseTableScript(): String = """
+        (function() {
+            var expectedSeatHeader = '选中/选课上限/课堂容量/待审核人数';
+            var collectedCourses = [];
+            var visitedPageSignatures = {};
+            var pageCount = 0;
+            var initialAttempts = 0;
+            var completed = false;
+
+            function visible(el) {
+                return !!el && el.offsetWidth > 0 && el.offsetHeight > 0;
+            }
+            function normalizeHeader(text) {
+                return String(text || '').replace(/[\s\u00a0]+/g, '').replace(/／/g, '/');
+            }
+            function normalizeCode(text) {
+                return String(text || '').replace(/[\s\u00a0]+/g, '').trim();
+            }
+            function parseSeatCell(rawText) {
+                var normalized = normalizeHeader(rawText);
+                var match = normalized.match(/^(\d+)\/(\d+)\/(\d+)\/(\d+)$/);
+                if (!match) {
+                    return {
+                        rawSeatText: String(rawText || '').trim(),
+                        selectedCount: null,
+                        selectionLimit: null,
+                        classroomCapacity: null,
+                        pendingCount: null,
+                        parseError: '席位字段必须严格符合“非负整数/非负整数/非负整数/非负整数”'
+                    };
+                }
+                return {
+                    rawSeatText: String(rawText || '').trim(),
+                    selectedCount: Number(match[1]),
+                    selectionLimit: Number(match[2]),
+                    classroomCapacity: Number(match[3]),
+                    pendingCount: Number(match[4]),
+                    parseError: null
+                };
+            }
+            function findTableInfo() {
+                var tables = Array.from(document.querySelectorAll('table')).filter(visible);
+                for (var ti = 0; ti < tables.length; ti++) {
+                    var headerRows = Array.from(tables[ti].querySelectorAll('thead tr, tr'));
+                    for (var hi = 0; hi < headerRows.length; hi++) {
+                        var headers = Array.from(headerRows[hi].querySelectorAll('th, td'));
+                        var seatIndex = headers.findIndex(function(cell) {
+                            return normalizeHeader(cell.textContent || cell.innerText) === expectedSeatHeader;
+                        });
+                        if (seatIndex < 0) continue;
+                        var codeIndex = headers.findIndex(function(cell) {
+                            var text = normalizeHeader(cell.textContent || cell.innerText);
+                            return text === '课堂号' || text === '教学班号' || text === '课堂代码' ||
+                                text.indexOf('课堂号') !== -1 || text.indexOf('教学班号') !== -1;
+                        });
+                        if (codeIndex < 0) {
+                            return { error: '已找到席位表头，但未找到课堂号表头' };
+                        }
+                        return {
+                            table: tables[ti],
+                            headerRow: headerRows[hi],
+                            seatIndex: seatIndex,
+                            codeIndex: codeIndex
+                        };
+                    }
+                }
+                return null;
+            }
+            function dataRows(info) {
+                return Array.from(info.table.querySelectorAll('tbody tr, tr')).filter(function(row) {
+                    if (row === info.headerRow || !visible(row)) return false;
+                    return Array.from(row.children).some(function(cell) {
+                        return cell.tagName && cell.tagName.toLowerCase() === 'td';
+                    });
+                });
+            }
+            function applyButtonIn(row) {
+                return Array.from(row.querySelectorAll('button, a, span[onclick], input[type="button"]')).find(function(el) {
+                    var text = (el.innerText || el.textContent || el.value || '').trim();
+                    return visible(el) && (text === '申请' ||
+                        (text.indexOf('申请') !== -1 && text.indexOf('已申请') === -1));
+                }) || null;
+            }
+            function pageSignature(info, rows) {
+                return rows.map(function(row) {
+                    var cells = Array.from(row.children);
+                    return normalizeCode(cells[info.codeIndex] && cells[info.codeIndex].textContent) + ':' +
+                        normalizeHeader(cells[info.seatIndex] && cells[info.seatIndex].textContent);
+                }).join('|');
+            }
+            function readCurrentPage(info, rows) {
+                rows.forEach(function(row) {
+                    var cells = Array.from(row.children);
+                    var codeCell = cells[info.codeIndex];
+                    var seatCell = cells[info.seatIndex];
+                    var classCode = normalizeCode(codeCell && (codeCell.textContent || codeCell.innerText));
+                    var parsed = parseSeatCell(seatCell && (seatCell.textContent || seatCell.innerText));
+                    collectedCourses.push({
+                        classCode: classCode,
+                        rawSeatText: parsed.rawSeatText,
+                        selectedCount: parsed.selectedCount,
+                        selectionLimit: parsed.selectionLimit,
+                        classroomCapacity: parsed.classroomCapacity,
+                        pendingCount: parsed.pendingCount,
+                        hasApplyButton: !!applyButtonIn(row),
+                        parseError: classCode ? parsed.parseError : '课堂号为空'
+                    });
+                });
+            }
+            function findNextPageButton() {
+                var selectors = [
+                    '.el-pagination .btn-next:not([disabled])',
+                    '.ant-pagination-next:not(.ant-pagination-disabled) button',
+                    '.ant-pagination-next:not(.ant-pagination-disabled) a',
+                    '.pagination .next:not(.disabled) a',
+                    'button[aria-label="下一页"]:not([disabled])',
+                    'a[aria-label="下一页"]'
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                    var button = document.querySelector(selectors[i]);
+                    if (button && visible(button) &&
+                        button.getAttribute('aria-disabled') !== 'true' &&
+                        !(button.closest('.disabled, .is-disabled, .ant-pagination-disabled'))) {
+                        return button;
+                    }
+                }
+                return null;
+            }
+            function finish(error) {
+                if (completed) return;
+                completed = true;
+                var payload = { courses: collectedCourses, error: error || null };
+                try { AndroidBridge.onAdjustmentCourseTableResult(JSON.stringify(payload)); } catch(e) {}
+            }
+            function waitForPageChange(previousSignature, attempts) {
+                var info = findTableInfo();
+                if (info && !info.error) {
+                    var rows = dataRows(info);
+                    var signature = pageSignature(info, rows);
+                    if (rows.length > 0 && signature && signature !== previousSignature) {
+                        collectCurrentPage();
+                        return;
+                    }
+                }
+                if (attempts >= 40) {
+                    finish('翻页后表格内容未在规定时间内更新');
+                    return;
+                }
+                setTimeout(function() { waitForPageChange(previousSignature, attempts + 1); }, 250);
+            }
+            function collectCurrentPage() {
+                var info = findTableInfo();
+                if (!info) {
+                    if (initialAttempts++ >= 40) finish('未找到“' + expectedSeatHeader + '”表格');
+                    else setTimeout(collectCurrentPage, 500);
+                    return;
+                }
+                if (info.error) {
+                    finish(info.error);
+                    return;
+                }
+                var rows = dataRows(info);
+                if (rows.length === 0) {
+                    if (initialAttempts++ >= 40) finish('换班表格中没有可读取的课程行');
+                    else setTimeout(collectCurrentPage, 500);
+                    return;
+                }
+                var signature = pageSignature(info, rows);
+                if (!signature) {
+                    finish('无法生成换班表格页签名');
+                    return;
+                }
+                if (visitedPageSignatures[signature]) {
+                    finish('检测到重复分页，已停止抓取以避免死循环');
+                    return;
+                }
+                visitedPageSignatures[signature] = true;
+                pageCount++;
+                readCurrentPage(info, rows);
+                var next = findNextPageButton();
+                if (!next) {
+                    finish(null);
+                    return;
+                }
+                if (pageCount >= 100) {
+                    finish('换班表格分页超过安全上限 100 页');
+                    return;
+                }
+                next.click();
+                setTimeout(function() { waitForPageChange(signature, 0); }, 300);
+            }
+
+            collectCurrentPage();
+        })();
+    """.trimIndent()
+
+    /** 按本地选出的目标课堂重新读取四项快照；快照未变化时才点击该行“申请”。 */
+    fun getClickAdjustmentApplyScript(
+        targetClassCode: String,
+        selectedCount: Int,
+        selectionLimit: Int,
+        classroomCapacity: Int,
+        pendingCount: Int
+    ): String {
         val safeCode = escapeJs(targetClassCode)
         return """
             (function() {
                 var code = "$safeCode";
+                var expectedSeatHeader = '选中/选课上限/课堂容量/待审核人数';
+                var expectedCounts = [$selectedCount, $selectionLimit, $classroomCapacity, $pendingCount];
                 var attempts = 0;
+                var searchTriggered = false;
                 function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+                function normalizeHeader(text) {
+                    return String(text || '').replace(/[\s\u00a0]+/g, '').replace(/／/g, '/');
+                }
+                function normalizeCode(text) {
+                    return String(text || '').replace(/[\s\u00a0]+/g, '').trim().toLowerCase();
+                }
                 function setNativeValue(el, value) {
                     var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                     setter.call(el, value);
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                 }
-                function findAndApply() {
-                    attempts++;
+                function findTableInfo() {
+                    var tables = Array.from(document.querySelectorAll('table')).filter(visible);
+                    for (var ti = 0; ti < tables.length; ti++) {
+                        var headerRows = Array.from(tables[ti].querySelectorAll('thead tr, tr'));
+                        for (var hi = 0; hi < headerRows.length; hi++) {
+                            var headers = Array.from(headerRows[hi].querySelectorAll('th, td'));
+                            var seatIndex = headers.findIndex(function(cell) {
+                                return normalizeHeader(cell.textContent || cell.innerText) === expectedSeatHeader;
+                            });
+                            if (seatIndex < 0) continue;
+                            var codeIndex = headers.findIndex(function(cell) {
+                                var text = normalizeHeader(cell.textContent || cell.innerText);
+                                return text === '课堂号' || text === '教学班号' || text === '课堂代码' ||
+                                    text.indexOf('课堂号') !== -1 || text.indexOf('教学班号') !== -1;
+                            });
+                            if (codeIndex >= 0) return { table: tables[ti], headerRow: headerRows[hi], seatIndex: seatIndex, codeIndex: codeIndex };
+                        }
+                    }
+                    return null;
+                }
+                function triggerSearch() {
+                    if (searchTriggered) return;
+                    searchTriggered = true;
                     var inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])')).filter(visible);
                     var input = inputs.find(function(el) {
-                        var p = (el.placeholder || '').toLowerCase();
-                        return p.indexOf('课堂') !== -1 || p.indexOf('课程') !== -1;
+                        var placeholder = (el.placeholder || '').toLowerCase();
+                        return placeholder.indexOf('课堂') !== -1 || placeholder.indexOf('课程') !== -1;
                     }) || inputs[0];
-                    if (input && input.value !== code) {
-                        input.focus();
-                        setNativeValue(input, code);
-                        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-                        var search = Array.from(document.querySelectorAll('button, a')).find(function(el) {
-                            var t = (el.innerText || el.textContent || '').trim();
-                            return visible(el) && (t === '搜索' || t === '查询');
-                        });
-                        if (search) search.click();
-                    }
-                    var rows = Array.from(document.querySelectorAll('tr, .course-row, .course-item')).filter(function(row) {
-                        return (row.innerText || row.textContent || '').toLowerCase().indexOf(code.toLowerCase()) !== -1;
+                    if (!input) return;
+                    input.focus();
+                    setNativeValue(input, code);
+                    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+                    var search = Array.from(document.querySelectorAll('button, a')).find(function(el) {
+                        var text = (el.innerText || el.textContent || '').trim();
+                        return visible(el) && (text === '搜索' || text === '查询');
                     });
-                    if (rows.length === 1) {
-                        var apply = Array.from(rows[0].querySelectorAll('button, a, span[onclick], input[type="button"]')).find(function(el) {
-                            var t = (el.innerText || el.textContent || el.value || '').trim();
-                            return visible(el) && (t === '申请' || (t.indexOf('申请') !== -1 && t.indexOf('已申请') === -1));
+                    if (search) search.click();
+                }
+                function verifyAndApply() {
+                    attempts++;
+                    triggerSearch();
+                    var info = findTableInfo();
+                    if (info) {
+                        var rows = Array.from(info.table.querySelectorAll('tbody tr, tr')).filter(function(row) {
+                            if (row === info.headerRow || !visible(row)) return false;
+                            var cells = Array.from(row.children);
+                            return normalizeCode(cells[info.codeIndex] && cells[info.codeIndex].textContent) === normalizeCode(code);
                         });
-                        if (apply) {
+                        if (rows.length > 1) {
+                            try { AndroidBridge.onAdjustmentApplyResult(false, '目标课堂在换班表格中不唯一'); } catch(e) {}
+                            return;
+                        }
+                        if (rows.length === 1) {
+                            var cells = Array.from(rows[0].children);
+                            var rawSeatText = cells[info.seatIndex] && (cells[info.seatIndex].textContent || cells[info.seatIndex].innerText);
+                            var match = normalizeHeader(rawSeatText).match(/^(\d+)\/(\d+)\/(\d+)\/(\d+)$/);
+                            if (!match) {
+                                try { AndroidBridge.onAdjustmentApplyResult(false, '点击申请前无法重新解析席位字段'); } catch(e) {}
+                                return;
+                            }
+                            var actualCounts = [Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4])];
+                            var unchanged = actualCounts.every(function(value, index) { return value === expectedCounts[index]; });
+                            if (!unchanged) {
+                                try { AndroidBridge.onAdjustmentApplyResult(false, '点击申请前席位数据已变化，安全取消本次申请'); } catch(e) {}
+                                return;
+                            }
+                            var apply = Array.from(rows[0].querySelectorAll('button, a, span[onclick], input[type="button"]')).find(function(el) {
+                                var text = (el.innerText || el.textContent || el.value || '').trim();
+                                return visible(el) && (text === '申请' ||
+                                    (text.indexOf('申请') !== -1 && text.indexOf('已申请') === -1));
+                            });
+                            if (!apply) {
+                                try { AndroidBridge.onAdjustmentApplyResult(false, '目标课堂未找到申请按钮'); } catch(e) {}
+                                return;
+                            }
                             apply.click();
-                            try { AndroidBridge.onAdjustmentApplyResult(true, "已定位目标课堂并点击申请"); } catch(e) {}
+                            try { AndroidBridge.onAdjustmentApplyResult(true, '已复核目标课堂席位快照并点击申请'); } catch(e) {}
                             return;
                         }
                     }
-                    if (attempts >= 30) {
-                        try { AndroidBridge.onAdjustmentApplyResult(false, "未能按目标课堂号定位申请按钮"); } catch(e) {}
+                    if (attempts >= 40) {
+                        try { AndroidBridge.onAdjustmentApplyResult(false, '未能按目标课堂号唯一定位申请行'); } catch(e) {}
                         return;
                     }
-                    setTimeout(findAndApply, 500);
+                    setTimeout(verifyAndApply, 500);
                 }
-                findAndApply();
+                verifyAndApply();
             })();
         """.trimIndent()
     }
