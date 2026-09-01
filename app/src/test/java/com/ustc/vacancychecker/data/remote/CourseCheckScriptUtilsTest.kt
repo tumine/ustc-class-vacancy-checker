@@ -35,6 +35,28 @@ class CourseCheckScriptUtilsTest {
     }
 
     @Test
+    fun `select result script recognizes current iview result dialog`() {
+        val script = CourseCheckScriptUtils.getCheckSelectResultScript()
+
+        assertTrue(script.contains(".ivu-modal"))
+        assertTrue(script.contains(".ivu-modal-wrap"))
+        assertTrue(script.contains(".ivu-modal-header-inner"))
+        assertTrue(script.contains(".ivu-modal-body"))
+        assertTrue(script.contains("hasResultTitle"))
+        assertTrue(script.contains("return reportResult(modal, false)"))
+    }
+
+    @Test
+    fun `select result script checks failure before success`() {
+        val script = CourseCheckScriptUtils.getCheckSelectResultScript()
+
+        val errorCheck = script.indexOf("containsAny(messageText, errorPatterns)")
+        val successCheck = script.indexOf("containsAny(messageText, successPatterns)")
+        assertTrue(errorCheck >= 0)
+        assertTrue(successCheck > errorCheck)
+    }
+
+    @Test
     fun `drop-only script refuses to drop when switch button also exists`() {
         val script = CourseCheckScriptUtils.getClickDropButtonScript("011144.01")
 

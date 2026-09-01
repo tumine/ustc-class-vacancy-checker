@@ -1474,6 +1474,22 @@ object CourseCheckScriptUtils {
                 var attempts = 0;
                 var maxAttempts = 20;
                 var hasResult = false;
+                var modalSelector = [
+                    '.modal', '.modal-dialog', '.dialog', '.layui-layer', '.layui-layer-dialog',
+                    '.alert', '.toast', '.message', '[role="alert"]', '[role="dialog"]', '[role="alertdialog"]',
+                    '.ant-modal', '.ant-modal-wrap', '.ant-message-notice',
+                    '.el-dialog', '.el-dialog__wrapper', '.el-message-box', '.el-message-box__wrapper', '.el-message',
+                    '.ivu-modal', '.ivu-modal-wrap', '.ivu-message-notice'
+                ].join(', ');
+                var titleSelector = [
+                    '.modal-title', '.dialog-title', '.layui-layer-title', '.ant-modal-title',
+                    '.el-dialog__title', '.el-message-box__title',
+                    '.ivu-modal-header-inner', '.ivu-modal-header'
+                ].join(', ');
+                var bodySelector = [
+                    '.modal-body', '.dialog-body', '.layui-layer-content', '.ant-modal-body',
+                    '.el-dialog__body', '.el-message-box__message', '.ivu-modal-body'
+                ].join(', ');
                 
                 function logDom(msg) {
                     try { AndroidBridge.logDomInfo(msg); } catch(e) { console.log(msg); }
@@ -1482,8 +1498,43 @@ object CourseCheckScriptUtils {
                 /**
                  * 从弹窗文本中提取核心消息（去除标题和按钮文字）
                  */
+                function getText(element) {
+                    return ((element && (element.innerText || element.textContent)) || '').trim();
+                }
+
+                function isVisible(element) {
+                    if (!element) return false;
+                    var style = window.getComputedStyle(element);
+                    return element.offsetWidth > 0 && element.offsetHeight > 0 &&
+                        style.display !== 'none' && style.visibility !== 'hidden';
+                }
+
+                function containsAny(text, patterns) {
+                    for (var i = 0; i < patterns.length; i++) {
+                        if (text.indexOf(patterns[i]) !== -1) return true;
+                    }
+                    return false;
+                }
+
+                function getModalTitle(modal, modalText) {
+                    var titleElement = modal.querySelector(titleSelector);
+                    if (titleElement) return getText(titleElement);
+
+                    var lines = modalText.split(/\n/);
+                    for (var i = 0; i < lines.length; i++) {
+                        var line = lines[i].replace(/\s/g, '');
+                        if (line === '选课结果') return lines[i].trim();
+                    }
+                    return '';
+                }
+
+                function isSelectResultModal(modal, modalText) {
+                    return getModalTitle(modal, modalText).replace(/\s/g, '').indexOf('选课结果') !== -1;
+                }
+
                 function extractCoreMessage(modal, isSelectSuccess) {
-                    var modalText = (modal.innerText || modal.textContent || '').trim();
+                    var bodyElement = modal.querySelector(bodySelector);
+                    var modalText = getText(bodyElement) || getText(modal);
                     
                     // 移除常见按钮文字
                     var buttonPatterns = ['确定', '取消', '关闭', 'OK', 'Cancel', 'Close', '确认', '是', '否'];
@@ -1525,69 +1576,60 @@ object CourseCheckScriptUtils {
                     
                     return modalText.substring(0, 50);
                 }
+
+                function closeModal(modal) {
+                    var confirmBtns = modal.querySelectorAll('button, a, input[type="button"], input[type="submit"]');
+                    for (var i = 0; i < confirmBtns.length; i++) {
+                        var btnText = (getText(confirmBtns[i]) || confirmBtns[i].value || '').trim();
+                        if (btnText.indexOf('确定') !== -1 || btnText.indexOf('关闭') !== -1 || btnText === 'OK') {
+                            confirmBtns[i].click();
+                            return;
+                        }
+                    }
+                }
+
+                function reportResult(modal, success) {
+                    hasResult = true;
+                    var coreMsg = extractCoreMessage(modal, success);
+                    logDom((success ? "Select success detected: " : "Select error detected: ") + coreMsg);
+                    closeModal(modal);
+                    try { AndroidBridge.onSelectResult(success, coreMsg); } catch(e) {}
+                    return true;
+                }
                 
                 function tryCheckResult() {
                     if (hasResult) return true;
                     var successPatterns = ['选课成功', '成功', '已完成'];
-                    var errorPatterns = ['选课失败', '失败', '错误', '已满', '冲突', '权限', '限制', '不符合', '不能', '无法'];
+                    var errorPatterns = [
+                        '选课失败', '失败', '错误', '已满', '满额', '冲突', '权限', '限制',
+                        '不符合', '不能', '无法', '不允许', '超过', '上限'
+                    ];
                     
                     // 查找弹窗/提示框
-                    var modals = document.querySelectorAll(
-                        '.modal, .dialog, .layui-layer, .alert, .toast, .message, ' +
-                        '[role="alert"], [role="dialog"], ' +
-                        '.ant-modal, .ant-message, .el-dialog, .el-message'
-                    );
+                    var modals = document.querySelectorAll(modalSelector);
                     
                     for (var i = 0; i < modals.length; i++) {
                         var modal = modals[i];
-                        if (modal.offsetWidth <= 0) continue;
-                        
-                        var modalText = (modal.innerText || modal.textContent || '').trim();
-                        
-                        // 检查成功消息
-                        for (var s = 0; s < successPatterns.length; s++) {
-                            if (modalText.indexOf(successPatterns[s]) !== -1) {
-                                logDom("Select success detected: " + modalText);
-                                hasResult = true;
-                                
-                                var coreMsg = extractCoreMessage(modal, true);
-                                logDom("Core message: " + coreMsg);
-                                
-                                // 尝试点击确认按钮关闭弹窗
-                                var confirmBtns = modal.querySelectorAll('button, a, input[type="button"]');
-                                for (var ci = 0; ci < confirmBtns.length; ci++) {
-                                    var btnText = (confirmBtns[ci].innerText || '').trim();
-                                    if (btnText.indexOf('确定') !== -1 || btnText.indexOf('关闭') !== -1 || btnText === 'OK') {
-                                        confirmBtns[ci].click();
-                                        break;
-                                    }
-                                }
-                                try { AndroidBridge.onSelectResult(true, coreMsg); } catch(e) {}
-                                return true;
-                            }
+                        if (!isVisible(modal)) continue;
+
+                        var modalText = getText(modal);
+                        var bodyElement = modal.querySelector(bodySelector);
+                        var messageText = getText(bodyElement) || modalText;
+                        var hasResultTitle = isSelectResultModal(modal, modalText);
+
+                        // 失败优先，避免失败原因中包含“成功”等字样时被误判。
+                        if (containsAny(messageText, errorPatterns)) {
+                            return reportResult(modal, false);
                         }
-                        
-                        // 检查错误消息
-                        for (var e = 0; e < errorPatterns.length; e++) {
-                            if (modalText.indexOf(errorPatterns[e]) !== -1) {
-                                logDom("Select error detected: " + modalText);
-                                hasResult = true;
-                                
-                                var coreMsg = extractCoreMessage(modal, false);
-                                logDom("Core message: " + coreMsg);
-                                
-                                // 尝试点击确认按钮关闭弹窗
-                                var confirmBtns = modal.querySelectorAll('button, a, input[type="button"]');
-                                for (var ci = 0; ci < confirmBtns.length; ci++) {
-                                    var btnText = (confirmBtns[ci].innerText || '').trim();
-                                    if (btnText.indexOf('确定') !== -1 || btnText.indexOf('关闭') !== -1 || btnText === 'OK') {
-                                        confirmBtns[ci].click();
-                                        break;
-                                    }
-                                }
-                                try { AndroidBridge.onSelectResult(false, coreMsg); } catch(e) {}
-                                return true;
-                            }
+
+                        if (containsAny(messageText, successPatterns)) {
+                            return reportResult(modal, true);
+                        }
+
+                        // 教务系统的失败原因不固定；标题已经明确为“选课结果”时，
+                        // 未出现成功语义就应作为失败回传，而不是等待到超时。
+                        if (hasResultTitle) {
+                            return reportResult(modal, false);
                         }
                     }
                     
