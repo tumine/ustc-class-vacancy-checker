@@ -33,6 +33,13 @@ class SettingsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = 60
         )
+
+    val strongBackgroundTracking: StateFlow<Boolean> = repository.strongBackgroundTrackingFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
     
     val verificationCodeMethod: StateFlow<VerificationCodeMethod> = repository.verificationCodeMethodFlow
         .stateIn(
@@ -49,6 +56,12 @@ class SettingsViewModel @Inject constructor(
     fun updateInterval(interval: Int) {
         viewModelScope.launch {
             repository.updateMonitoringInterval(interval)
+        }
+    }
+
+    fun updateStrongBackgroundTracking(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.updateStrongBackgroundTracking(enabled)
         }
     }
     

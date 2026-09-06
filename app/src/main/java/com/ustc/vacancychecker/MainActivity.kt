@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
 
     private val showBatteryOptimizationDialog = mutableStateOf(false)
     private var monitoringActive = false
+    private var strongBackgroundTrackingActive = false
     private var batteryOptimizationDialogDismissed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,20 +58,34 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             combine(
                 courseRepository.monitoringIntervalFlow,
-                courseRepository.trackedCoursesFlow
-            ) { interval, courses ->
-                interval > 0 && courses.any { it.isEffectivelyMonitoring }
+                courseRepository.trackedCoursesFlow,
+                courseRepository.strongBackgroundTrackingFlow
+            ) { interval, courses, strongBackgroundTracking ->
+                MonitoringState(
+                    shouldMonitor = interval > 0 && courses.any { it.isEffectivelyMonitoring },
+                    strongBackgroundTracking = strongBackgroundTracking
+                )
             }
                 .distinctUntilChanged()
-                .collectLatest { shouldMonitor ->
-                    val monitoringWasJustEnabled = shouldMonitor && !monitoringActive
-                    monitoringActive = shouldMonitor
-                    if (shouldMonitor) {
-                        CourseMonitoringService.start(applicationContext)
-                        if (!isIgnoringBatteryOptimizations() &&
-                            (monitoringWasJustEnabled || !batteryOptimizationDialogDismissed)
+                .collectLatest { state ->
+                    val strongTrackingWasJustEnabled = state.shouldMonitor &&
+                        state.strongBackgroundTracking &&
+                        (!monitoringActive || !strongBackgroundTrackingActive)
+                    monitoringActive = state.shouldMonitor
+                    strongBackgroundTrackingActive = state.strongBackgroundTracking
+                    if (state.shouldMonitor) {
+                        CourseMonitoringService.start(
+                            applicationContext,
+                            state.strongBackgroundTracking
+                        )
+                        if (state.strongBackgroundTracking &&
+                            !isIgnoringBatteryOptimizations() &&
+                            (strongTrackingWasJustEnabled || !batteryOptimizationDialogDismissed)
                         ) {
                             showBatteryOptimizationDialog.value = true
+                        } else if (!state.strongBackgroundTracking) {
+                            batteryOptimizationDialogDismissed = false
+                            showBatteryOptimizationDialog.value = false
                         }
                     } else {
                         CourseMonitoringService.stop(applicationContext)
@@ -139,7 +154,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (monitoringActive && isIgnoringBatteryOptimizations()) {
+        if (monitoringActive && strongBackgroundTrackingActive &&
+            isIgnoringBatteryOptimizations()
+        ) {
             showBatteryOptimizationDialog.value = false
         }
     }
@@ -168,4 +185,9 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
     }
+
+    private data class MonitoringState(
+        val shouldMonitor: Boolean,
+        val strongBackgroundTracking: Boolean
+    )
 }

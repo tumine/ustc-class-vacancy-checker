@@ -36,6 +36,7 @@ class CourseRepository @Inject constructor(
     companion object {
         private val TRACKED_COURSES_KEY = stringPreferencesKey("tracked_courses")
         private val MONITORING_INTERVAL_KEY = intPreferencesKey("monitoring_interval")
+        private val STRONG_BACKGROUND_TRACKING_KEY = booleanPreferencesKey("strong_background_tracking")
         private val AUTO_SELECT_ENABLED_KEY = booleanPreferencesKey("auto_select_enabled")
         private val VERIFICATION_CODE_METHOD_KEY = stringPreferencesKey("verification_code_method")
     }
@@ -46,6 +47,10 @@ class CourseRepository @Inject constructor(
     }
     val monitoringIntervalFlow: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[MONITORING_INTERVAL_KEY] ?: 60
+    }.distinctUntilChanged()
+
+    val strongBackgroundTrackingFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[STRONG_BACKGROUND_TRACKING_KEY] ?: false
     }.distinctUntilChanged()
     
     val autoSelectEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -63,6 +68,12 @@ class CourseRepository @Inject constructor(
     suspend fun updateMonitoringInterval(intervalMinutes: Int) {
         context.dataStore.edit { preferences ->
             preferences[MONITORING_INTERVAL_KEY] = intervalMinutes
+        }
+    }
+
+    suspend fun updateStrongBackgroundTracking(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[STRONG_BACKGROUND_TRACKING_KEY] = enabled
         }
     }
     

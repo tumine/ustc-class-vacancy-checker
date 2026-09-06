@@ -44,11 +44,12 @@ class CourseMonitoringService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var monitoringJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile
+    private var strongBackgroundTracking = false
 
     override fun onCreate() {
         super.onCreate()
         startInForeground(buildNotification(courseCount = null, intervalMinutes = null))
-        acquireWakeLock()
         cancelLegacyPeriodicWork()
     }
 
@@ -58,15 +59,30 @@ class CourseMonitoringService : Service() {
             return START_NOT_STICKY
         }
 
+        if (intent?.hasExtra(EXTRA_STRONG_BACKGROUND_TRACKING) == true) {
+            updateStrongBackgroundTracking(
+                intent.getBooleanExtra(EXTRA_STRONG_BACKGROUND_TRACKING, false)
+            )
+        }
+
         if (monitoringJob?.isActive != true) {
             monitoringJob = serviceScope.launch {
                 observeConfigurationAndScheduleChecks()
             }
         }
-        return START_STICKY
+        // A null intent is only delivered when Android recreates a previously sticky service.
+        return if (intent == null || strongBackgroundTracking) START_STICKY else START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (!strongBackgroundTracking) {
+            Log.i(TAG, "App removed from recent tasks; stopping non-strong monitoring")
+            stopMonitoring()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
         monitoringJob?.cancel()
@@ -81,6 +97,7 @@ class CourseMonitoringService : Service() {
      * coroutine timers and the work they enqueue are not postponed until the next screen wake-up.
      */
     @SuppressLint("WakelockTimeout")
+    @Synchronized
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
 
@@ -103,6 +120,7 @@ class CourseMonitoringService : Service() {
         Log.d(TAG, "CPU wake lock acquired")
     }
 
+    @Synchronized
     private fun releaseWakeLock() {
         wakeLock?.let { lock ->
             if (lock.isHeld) lock.release()
@@ -114,11 +132,13 @@ class CourseMonitoringService : Service() {
     private suspend fun observeConfigurationAndScheduleChecks() {
         combine(
             repository.monitoringIntervalFlow,
-            repository.trackedCoursesFlow
-        ) { interval, courses ->
+            repository.trackedCoursesFlow,
+            repository.strongBackgroundTrackingFlow
+        ) { interval, courses, strongTracking ->
             MonitoringConfiguration(
                 intervalMinutes = interval,
-                courseCount = courses.count { it.isEffectivelyMonitoring }
+                courseCount = courses.count { it.isEffectivelyMonitoring },
+                strongBackgroundTracking = strongTracking
             )
         }
             .distinctUntilChanged()
@@ -129,6 +149,7 @@ class CourseMonitoringService : Service() {
                     return@collectLatest
                 }
 
+                updateStrongBackgroundTracking(configuration.strongBackgroundTracking)
                 updateNotification(configuration)
                 enqueueCheck()
 
@@ -154,6 +175,15 @@ class CourseMonitoringService : Service() {
         startInForeground(
             buildNotification(configuration.courseCount, configuration.intervalMinutes)
         )
+    }
+
+    private fun updateStrongBackgroundTracking(enabled: Boolean) {
+        strongBackgroundTracking = enabled
+        if (enabled) {
+            acquireWakeLock()
+        } else {
+            releaseWakeLock()
+        }
     }
 
     private fun startInForeground(notification: Notification) {
@@ -202,6 +232,8 @@ class CourseMonitoringService : Service() {
         monitoringJob?.cancel()
         monitoringJob = null
         cancelLegacyPeriodicWork()
+        WorkManager.getInstance(applicationContext)
+            .cancelUniqueWork(ClassVacancyWorker.IMMEDIATE_WORK_NAME)
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -209,26 +241,33 @@ class CourseMonitoringService : Service() {
 
     private data class MonitoringConfiguration(
         val intervalMinutes: Int,
-        val courseCount: Int
+        val courseCount: Int,
+        val strongBackgroundTracking: Boolean
     )
 
     companion object {
         private const val TAG = "CourseMonitoringService"
         private const val ACTION_START = "com.ustc.vacancychecker.action.START_MONITORING"
         private const val ACTION_STOP = "com.ustc.vacancychecker.action.STOP_MONITORING"
+        private const val EXTRA_STRONG_BACKGROUND_TRACKING =
+            "com.ustc.vacancychecker.extra.STRONG_BACKGROUND_TRACKING"
 
-        fun start(context: Context) {
+        fun start(context: Context, strongBackgroundTracking: Boolean) {
             WorkManager.getInstance(context.applicationContext)
                 .cancelUniqueWork(ClassVacancyWorker.LEGACY_PERIODIC_WORK_NAME)
             ContextCompat.startForegroundService(
                 context,
-                Intent(context, CourseMonitoringService::class.java).setAction(ACTION_START)
+                Intent(context, CourseMonitoringService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_STRONG_BACKGROUND_TRACKING, strongBackgroundTracking)
             )
         }
 
         fun stop(context: Context) {
-            WorkManager.getInstance(context.applicationContext)
-                .cancelUniqueWork(ClassVacancyWorker.LEGACY_PERIODIC_WORK_NAME)
+            WorkManager.getInstance(context.applicationContext).apply {
+                cancelUniqueWork(ClassVacancyWorker.LEGACY_PERIODIC_WORK_NAME)
+                cancelUniqueWork(ClassVacancyWorker.IMMEDIATE_WORK_NAME)
+            }
             context.stopService(
                 Intent(context, CourseMonitoringService::class.java).setAction(ACTION_STOP)
             )

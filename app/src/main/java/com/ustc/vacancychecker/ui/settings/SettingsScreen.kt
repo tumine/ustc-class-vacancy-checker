@@ -37,6 +37,7 @@ fun SettingsScreen(
 ) {
     var showLogoutDialog by remember { mutableStateOf(false) }
     val currentInterval by settingsViewModel.monitoringInterval.collectAsState()
+    val strongBackgroundTracking by settingsViewModel.strongBackgroundTracking.collectAsState()
     val verificationCodeMethod by settingsViewModel.verificationCodeMethod.collectAsState()
     val intervalOptions = if (com.ustc.vacancychecker.BuildConfig.DEBUG) {
         listOf(1, 5, 10, 15, 30, 60, 120, 240)
@@ -126,6 +127,42 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            settingsViewModel.updateStrongBackgroundTracking(
+                                !strongBackgroundTracking
+                            )
+                        }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "强后台跟踪", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = if (strongBackgroundTracking) {
+                                "息屏后仍按设定周期检查；从最近任务划掉应用不会停止跟踪。"
+                            } else {
+                                "息屏后允许系统暂停检查；从最近任务划掉应用将停止后台服务。"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, end = 12.dp)
+                        )
+                    }
+                    Switch(
+                        checked = strongBackgroundTracking,
+                        onCheckedChange = settingsViewModel::updateStrongBackgroundTracking
+                    )
                 }
             }
             
