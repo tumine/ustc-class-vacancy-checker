@@ -1,16 +1,26 @@
 package com.ustc.vacancychecker
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
 import com.ustc.vacancychecker.data.local.CredentialsManager
@@ -36,6 +46,10 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var courseRepository: CourseRepository
 
+    private val showBatteryOptimizationDialog = mutableStateOf(false)
+    private var monitoringActive = false
+    private var batteryOptimizationDialogDismissed = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -49,10 +63,19 @@ class MainActivity : ComponentActivity() {
             }
                 .distinctUntilChanged()
                 .collectLatest { shouldMonitor ->
+                    val monitoringWasJustEnabled = shouldMonitor && !monitoringActive
+                    monitoringActive = shouldMonitor
                     if (shouldMonitor) {
                         CourseMonitoringService.start(applicationContext)
+                        if (!isIgnoringBatteryOptimizations() &&
+                            (monitoringWasJustEnabled || !batteryOptimizationDialogDismissed)
+                        ) {
+                            showBatteryOptimizationDialog.value = true
+                        }
                     } else {
                         CourseMonitoringService.stop(applicationContext)
+                        batteryOptimizationDialogDismissed = false
+                        showBatteryOptimizationDialog.value = false
                     }
                 }
         }
@@ -86,7 +109,63 @@ class MainActivity : ComponentActivity() {
                         startDestination = startDestination
                     )
                 }
+
+                if (showBatteryOptimizationDialog.value) {
+                    AlertDialog(
+                        onDismissRequest = ::dismissBatteryOptimizationDialog,
+                        title = { Text("允许息屏持续监控") },
+                        text = {
+                            Text(
+                                "Android 的电池优化会在息屏后暂停网络和定时任务。" +
+                                    "请在接下来的系统窗口中允许本应用不受电池优化限制，" +
+                                    "否则课程空位监控只能在系统唤醒时继续。"
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = ::requestBatteryOptimizationExemption) {
+                                Text("前往允许")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = ::dismissBatteryOptimizationDialog) {
+                                Text("稍后")
+                            }
+                        }
+                    )
+                }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (monitoringActive && isIgnoringBatteryOptimizations()) {
+            showBatteryOptimizationDialog.value = false
+        }
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean =
+        getSystemService(PowerManager::class.java)
+            .isIgnoringBatteryOptimizations(packageName)
+
+    private fun dismissBatteryOptimizationDialog() {
+        batteryOptimizationDialogDismissed = true
+        showBatteryOptimizationDialog.value = false
+    }
+
+    // Course vacancy monitoring is a user-configured task-automation core function and cannot use
+    // FCM because the upstream JW service does not publish vacancy changes.
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryOptimizationExemption() {
+        dismissBatteryOptimizationDialog()
+        val packageUri = Uri.parse("package:$packageName")
+        try {
+            startActivity(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri)
+            )
+        } catch (_: ActivityNotFoundException) {
+            // Some vendor ROMs omit the direct request screen; open the exemption list instead.
+            startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
     }
 }

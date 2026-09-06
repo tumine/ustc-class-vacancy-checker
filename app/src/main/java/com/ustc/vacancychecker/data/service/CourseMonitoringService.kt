@@ -1,11 +1,13 @@
 package com.ustc.vacancychecker.data.service
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -41,10 +43,12 @@ class CourseMonitoringService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var monitoringJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         startInForeground(buildNotification(courseCount = null, intervalMinutes = null))
+        acquireWakeLock()
         cancelLegacyPeriodicWork()
     }
 
@@ -67,7 +71,44 @@ class CourseMonitoringService : Service() {
     override fun onDestroy() {
         monitoringJob?.cancel()
         serviceScope.cancel()
+        releaseWakeLock()
         super.onDestroy()
+    }
+
+    /**
+     * A foreground service raises process priority but does not keep the CPU running after the
+     * display turns off. Keep a partial wake lock for exactly the lifetime of active monitoring so
+     * coroutine timers and the work they enqueue are not postponed until the next screen wake-up.
+     */
+    @SuppressLint("WakelockTimeout")
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+
+        val powerManager = getSystemService(PowerManager::class.java)
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            Log.w(
+                TAG,
+                "Battery optimization exemption not granted; Doze can suspend monitoring"
+            )
+        }
+        wakeLock = powerManager
+            .newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "$packageName:course-monitoring"
+            )
+            .apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        Log.d(TAG, "CPU wake lock acquired")
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { lock ->
+            if (lock.isHeld) lock.release()
+        }
+        wakeLock = null
+        Log.d(TAG, "CPU wake lock released")
     }
 
     private suspend fun observeConfigurationAndScheduleChecks() {
@@ -161,6 +202,7 @@ class CourseMonitoringService : Service() {
         monitoringJob?.cancel()
         monitoringJob = null
         cancelLegacyPeriodicWork()
+        releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
