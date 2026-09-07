@@ -16,6 +16,7 @@ import com.ustc.vacancychecker.data.model.SelectResult
 import com.ustc.vacancychecker.data.model.CourseTrackingPlanner
 import com.ustc.vacancychecker.data.model.CourseSwitchState
 import com.ustc.vacancychecker.data.model.SelectedCourseBehavior
+import com.ustc.vacancychecker.data.model.VacancyNotificationPolicy
 import com.ustc.vacancychecker.data.remote.CatalogCourseResolver
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -149,8 +150,15 @@ class ClassVacancyWorker @AssistedInject constructor(
                                     isAlreadySelected = false
                                 )
                             }
-                            vacancy > 0 && !data.isAlreadySelected && request.groupId !in groupsWithSwitchResult -> {
+                            !data.isAlreadySelected &&
+                                request.groupId !in groupsWithSwitchResult &&
+                                VacancyNotificationPolicy.shouldNotify(
+                                    currentVacancy = vacancy,
+                                    previousCheckedVacancy = course.vacancy,
+                                    lastNotifiedVacancy = course.lastNotifiedVacancy
+                                ) -> {
                                 sendVacancyNotification(course.courseId, course.courseName, vacancy)
+                                repository.recordVacancyNotification(course.courseId, vacancy)
                             }
                         }
 

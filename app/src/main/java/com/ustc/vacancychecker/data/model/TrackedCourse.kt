@@ -13,6 +13,11 @@ data class TrackedCourse(
     @SerializedName("courseNumber") val courseNumber: String? = null,
     @SerializedName("teacher") val teacher: String = "",
     @SerializedName("vacancy") val vacancy: Int = 0,
+    /**
+     * 最近一次发送余量通知时的空余名额数。课堂号由本记录的 [courseId] 提供。
+     * null 表示这个课堂尚未发送过余量通知。
+     */
+    @SerializedName("lastNotifiedVacancy") val lastNotifiedVacancy: Int? = null,
     @SerializedName("lastCheckTime") val lastCheckTime: Long = 0L,
     @SerializedName("isMonitoring") val isMonitoring: Boolean = true,
     @SerializedName("autoSelectEnabled") val autoSelectEnabled: Boolean? = false,

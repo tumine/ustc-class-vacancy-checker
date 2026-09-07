@@ -117,6 +117,7 @@ class CourseRepository @Inject constructor(
                     val old = currentList[index]
                     currentList[index] = newCourse.copy(
                         vacancy = old.vacancy,
+                        lastNotifiedVacancy = old.lastNotifiedVacancy,
                         lastCheckTime = old.lastCheckTime,
                         isMonitoring = old.isMonitoring,
                         autoSelectEnabled = old.autoSelectEnabled,
@@ -233,6 +234,18 @@ class CourseRepository @Inject constructor(
                 )
                 preferences[TRACKED_COURSES_KEY] = gson.toJson(currentList)
             }
+        }
+    }
+
+    /** 记录该课堂最近一次余量通知所包含的课堂号和空余名额数。 */
+    suspend fun recordVacancyNotification(courseId: String, vacancy: Int) {
+        context.dataStore.edit { preferences ->
+            val currentList = readCourses(preferences)
+            val index = currentList.indexOfFirst { it.courseId == courseId }
+            if (index == -1) return@edit
+
+            currentList[index] = currentList[index].copy(lastNotifiedVacancy = vacancy)
+            writeCourses(preferences, currentList)
         }
     }
 
