@@ -313,13 +313,9 @@ class BackgroundJwVacancyChecker @Inject constructor(
                             val selectedRequest = selectedObservation.request
                             if (selectedRequest.selectedCourseBehavior != SelectedCourseBehavior.PRIORITY_UPGRADE) return false
                             if (selectedRequest.pendingSwitchTargetId != null) return false
-                            val candidates = requests
+                            val candidates = CourseTrackingPlanner
+                                .eligibleUpgradeCandidates(selectedRequest, requests)
                                 .asSequence()
-                                .filter {
-                                    it.groupId == selectedRequest.groupId &&
-                                        it.priority < selectedRequest.priority
-                                }
-                                .sortedBy { it.priority }
                                 .map { request ->
                                     observations[request.courseId] ?: CourseObservation(
                                         request = request,
@@ -943,6 +939,14 @@ class BackgroundJwVacancyChecker @Inject constructor(
                                                 url.startsWith(COURSE_ADJUSTMENT_URL_PREFIX)
                                             ) {
                                                 when (operation.stage) {
+                                                    // 点击链接会销毁旧页面的 JS 上下文。极端情况下桥接回调
+                                                    // 来不及送达，但目标 URL 本身已经足以证明点击成功。
+                                                    SwitchStage.CLICKING_SOURCE_ACTION -> {
+                                                        operation.stage = SwitchStage.WAITING_ADJUSTMENT_PAGE
+                                                        operation.actionLog.add("已通过页面跳转确认进入单课换班")
+                                                        view?.postDelayed({ openAdjustmentCourseTable() }, 500)
+                                                        return
+                                                    }
                                                     SwitchStage.WAITING_ADJUSTMENT_PAGE -> {
                                                         view?.postDelayed({ openAdjustmentCourseTable() }, 500)
                                                         return

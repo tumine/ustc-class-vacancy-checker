@@ -48,7 +48,7 @@ data class TrackedCourse(
 }
 
 enum class SelectedCourseBehavior {
-    /** 继续关注优先级更高的课堂，并在发现空位后按页面按钮组合执行换班。 */
+    /** 继续关注优先级更高的课堂，仅对已开启自动选课的课堂执行换班。 */
     PRIORITY_UPGRADE,
 
     /** 安全默认值：暂停当前课程组，保留课堂开关和顺序。 */

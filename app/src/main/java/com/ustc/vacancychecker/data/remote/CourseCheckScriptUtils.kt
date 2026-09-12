@@ -1017,6 +1017,12 @@ object CourseCheckScriptUtils {
             (function() {
                 var code = "$safeCode".toLowerCase();
                 function visible(el) { return !!el && el.offsetWidth > 0 && el.offsetHeight > 0; }
+                function textOf(el) {
+                    return (el && (el.innerText || el.textContent || el.value) || '').trim();
+                }
+                function exactSingleCourseSwitch(el) {
+                    return textOf(el).replace(/\s/g, '') === '单课换班';
+                }
                 var rows = Array.from(document.querySelectorAll('tr, .course-row, .course-item')).filter(function(row) {
                     return (row.innerText || row.textContent || '').toLowerCase().indexOf(code) !== -1;
                 });
@@ -1039,17 +1045,60 @@ object CourseCheckScriptUtils {
                     return;
                 }
                 // 此分支绝不读取或点击 dropButtons。
-                switches[0].click();
+                var switchButton = switches[0];
+                var buttonGroup = switchButton.closest
+                    ? switchButton.closest('.btn-group, .dropdown, .ivu-dropdown, .el-dropdown')
+                    : null;
+                switchButton.click();
                 var attempts = 0;
+
+                function findMenuLink(root) {
+                    if (!root || !root.querySelectorAll) return null;
+
+                    // 教务页的 Bootstrap 下拉菜单结构是 li > a。不能把文字同样为
+                    // “单课换班”的 li 当作点击目标；HTMLElement.click() 不会把点击
+                    // 转发给它的子链接，因此旧实现会回报已点击、页面却没有跳转。
+                    var directLinks = Array.from(root.querySelectorAll(
+                        '.dropdown-menu a, .dropdown-menu button, ' +
+                        'a.dropdown-item, button.dropdown-item, ' +
+                        'a[role="menuitem"], button[role="menuitem"], ' +
+                        '[role="menuitem"] a, [role="menuitem"] button'
+                    ));
+                    var direct = directLinks.find(function(el) {
+                        return visible(el) && exactSingleCourseSwitch(el);
+                    });
+                    if (direct) return direct;
+
+                    // 兼容菜单项本身承担点击事件的组件库，但仍优先返回其中真正的
+                    // a/button，避免再次点击到仅用于布局的 li 容器。
+                    var interactiveItems = Array.from(root.querySelectorAll('[role="menuitem"], [onclick]'));
+                    for (var i = 0; i < interactiveItems.length; i++) {
+                        var item = interactiveItems[i];
+                        if (!visible(item) || !exactSingleCourseSwitch(item)) continue;
+                        var child = Array.from(item.querySelectorAll('a, button')).find(function(el) {
+                            return visible(el) && exactSingleCourseSwitch(el);
+                        });
+                        if (child) return child;
+                        if (item.tagName === 'A' || item.tagName === 'BUTTON' || item.hasAttribute('onclick')) {
+                            return item;
+                        }
+                    }
+                    return null;
+                }
+
                 function clickMenu() {
                     attempts++;
-                    var items = Array.from(document.querySelectorAll('li, a, button, [role="menuitem"], .dropdown-item')).filter(visible);
-                    var item = items.find(function(el) {
-                        return (el.innerText || el.textContent || '').trim() === '单课换班';
-                    });
+                    // 先在刚点击的按钮组内查找，防止页面中其他课堂的隐藏菜单同名项
+                    // 被误选；组件把浮层挂到 body 时再使用全页面兜底。
+                    var item = findMenuLink(buttonGroup) || findMenuLink(document);
                     if (item) {
                         item.click();
-                        try { AndroidBridge.onSingleCourseSwitchResult(true, "已点击换班并选择单课换班"); } catch(e) {}
+                        try {
+                            AndroidBridge.onSingleCourseSwitchResult(
+                                true,
+                                "已点击换班按钮和单课换班链接"
+                            );
+                        } catch(e) {}
                         return;
                     }
                     if (attempts >= 20) {

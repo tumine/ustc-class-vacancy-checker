@@ -70,8 +70,11 @@ class CourseCheckScriptUtilsTest {
         val script = CourseCheckScriptUtils.getClickSingleCourseSwitchScript("011144.01")
 
         assertTrue(script.contains("!hasDrop || switches.length === 0"))
-        assertTrue(script.contains("switches[0].click()"))
+        assertTrue(script.contains("switchButton.click()"))
         assertTrue(script.contains("=== '单课换班'"))
+        assertTrue(script.contains(".dropdown-menu a"))
+        assertTrue(script.contains("findMenuLink(buttonGroup) || findMenuLink(document)"))
+        assertFalse(script.contains("querySelectorAll('li, a"))
         assertFalse(script.contains("dropButtons[0].click()"))
     }
 

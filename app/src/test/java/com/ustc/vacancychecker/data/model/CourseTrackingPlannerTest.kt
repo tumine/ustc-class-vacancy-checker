@@ -52,6 +52,24 @@ class CourseTrackingPlannerTest {
     }
 
     @Test
+    fun `priority upgrade candidates require auto select and are ordered highest first`() {
+        val selected = request("A.04", "course:a", 3, SelectedCourseBehavior.PRIORITY_UPGRADE)
+        val candidates = CourseTrackingPlanner.eligibleUpgradeCandidates(
+            selected = selected,
+            requests = listOf(
+                request("A.03", "course:a", 2, autoSelectEnabled = true),
+                request("B.01", "course:b", 0, autoSelectEnabled = true),
+                request("A.01", "course:a", 0, autoSelectEnabled = false),
+                request("A.02", "course:a", 1, autoSelectEnabled = true),
+                request("A.05", "course:a", 4, autoSelectEnabled = true),
+                selected
+            )
+        )
+
+        assertEquals(listOf("A.02", "A.03"), candidates.map { it.courseId })
+    }
+
+    @Test
     fun `pending adjustment verification ids are copied into check request`() {
         val tracked = course("A.01", key = "catalog-course:42").copy(
             pendingSwitchSourceId = "A.02",
@@ -72,6 +90,11 @@ class CourseTrackingPlannerTest {
         priority = priority
     )
 
-    private fun request(id: String, group: String, priority: Int, behavior: SelectedCourseBehavior = SelectedCourseBehavior.DISABLE_GROUP) =
-        CourseCheckRequest(id, group, priority, false, behavior)
+    private fun request(
+        id: String,
+        group: String,
+        priority: Int,
+        behavior: SelectedCourseBehavior = SelectedCourseBehavior.DISABLE_GROUP,
+        autoSelectEnabled: Boolean = false
+    ) = CourseCheckRequest(id, group, priority, autoSelectEnabled, behavior)
 }

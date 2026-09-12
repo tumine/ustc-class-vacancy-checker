@@ -282,7 +282,7 @@ private fun GroupBehaviorSelector(
     }
     Text(
         when (behavior) {
-            SelectedCourseBehavior.PRIORITY_UPGRADE -> "发现更高优先级课堂有空位后，将按页面按钮组合执行退课后选课，或提交单课换班申请。"
+            SelectedCourseBehavior.PRIORITY_UPGRADE -> "已开启自动选课的更高优先级课堂有空位后，将按页面按钮组合执行退课后选课，或提交单课换班申请。"
             SelectedCourseBehavior.DISABLE_GROUP -> "安全默认值：暂停本组，但保留课堂开关与顺序。"
             SelectedCourseBehavior.DELETE_GROUP -> "确认选中后删除本组全部跟踪条目。"
         },

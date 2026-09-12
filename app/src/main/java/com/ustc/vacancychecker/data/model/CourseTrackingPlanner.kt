@@ -38,4 +38,21 @@ object CourseTrackingPlanner {
             SelectedCourseBehavior.DELETE_GROUP -> true
         }
     }
+
+    /**
+     * 返回允许自动换班的更高优先级课堂。关闭“自动选课”的课堂仍可被后台检查，
+     * 但不能成为“优先级升级”的自动操作目标。
+     */
+    fun eligibleUpgradeCandidates(
+        selected: CourseCheckRequest,
+        requests: List<CourseCheckRequest>
+    ): List<CourseCheckRequest> = requests
+        .asSequence()
+        .filter { candidate ->
+            candidate.groupId == selected.groupId &&
+                candidate.priority < selected.priority &&
+                candidate.autoSelectEnabled
+        }
+        .sortedBy { it.priority }
+        .toList()
 }
